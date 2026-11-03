@@ -139,9 +139,17 @@ async function carregar(){
   ROWS=new Map(rows.map(r=>[r.col+"|"+r.id,{col:r.col,id:r.id,casal:r.casal,data:r.data,json:JSON.stringify(r.data)}]));
   D=fromRows([...ROWS.values()]);
   if(!D.casals.length) D.casals=CASALS_DEF.map(c=>({...c}));
+  await carregarPermisos();
   LAST=toRecords(D);
   dataVer++;
   await carregarNoms();
+}
+// Permisos editats per la Supervisió (taula permisos_ui). El servidor aplica els mateixos canvis a la taula permisos.
+async function carregarPermisos(){
+  try{ const {data,error}=await sb.from("permisos_ui").select("m,rol,v"); if(error) throw error;
+    const o={}; (data||[]).forEach(x=>{ (o[x.m]=o[x.m]||{})[x.rol]=x.v; }); S._permUI=o; }
+  catch(e){ S._permUI=S._permUI||{}; }
+  aplicaPermisos();
 }
 // Talleristes i voluntariat no llegeixen la taula de persones: el servidor només els dona el nom dels seus inscrits.
 async function carregarNoms(){
@@ -368,8 +376,20 @@ PERMS.find(r=>r.m==="llista").nota="Talleristes i voluntariat: veuen el nom dels
    No es poden tocar la columna de Supervisió ni la fila d'Equip (només la Supervisió gestiona usuaris). */
 const PERMS_DEF=PERMS.map(r=>({m:r.m,p:{...r.p}}));
 const permDef=(m,k)=>((PERMS_DEF.find(x=>x.m===m)||{p:{}}).p[k]||"");
-const PERM_LOCK=(m,k)=> k==="supervisio" || m==="equip";
-function aplicaPermisos(){ const o=(D&&D.config&&D.config.permisos)||{}; PERMS.forEach(r=>{ const d=PERMS_DEF.find(x=>x.m===r.m); r.p={...d.p}; Object.entries(o[r.m]||{}).forEach(([k,v])=>{ if(!PERM_LOCK(r.m,k)) r.p[k]=v; }); }); }
+const PERM_LOCK=(m,k)=> k==="supervisio" || k==="soci" || m==="equip" || m==="aprovacio";
+/* On es desen els canvis (a la versió de proves, dins les dades; a producció, al servidor). */
+const permOverrides = () => (typeof S!=="undefined"&&S._permUI)||{};
+async function desarPermisos(canvis, motiu, fet){
+  const {error}=await sb.rpc("desar_permisos",{p_canvis:canvis.map(([m,rol,v])=>({m,rol,v})),p_motiu:motiu});
+  if(error){ toast("No s'han pogut desar els permisos: "+textError(error)); return fet(false); }
+  await carregarPermisos(); fet(true); toast("Cada persona veurà els canvis la propera vegada que entri.");
+}
+async function restaurarPermisos(motiu, fet){
+  const {error}=await sb.rpc("restaurar_permisos",{p_motiu:motiu});
+  if(error){ toast("No s'han pogut restaurar els permisos: "+textError(error)); return fet(false); }
+  await carregarPermisos(); fet(true);
+}
+function aplicaPermisos(){ const o=permOverrides(); PERMS.forEach(r=>{ const d=PERMS_DEF.find(x=>x.m===r.m); r.p={...d.p}; Object.entries(o[r.m]||{}).forEach(([k,v])=>{ if(!PERM_LOCK(r.m,k)) r.p[k]=v; }); }); }
 aplicaPermisos();
 const PM=Object.fromEntries(PERMS.map(r=>[r.m,r]));
 const esCoord = () => S.rol==="direccio"||S.rol==="supervisio";
@@ -1179,7 +1199,7 @@ VIEWS.config = () => {
   const L={C:"Consulta",E:"Enregistra",M:"Modifica",B:"Esborra"};
   const cell=v=> v ? '<span class="perms">'+"CEMB".split("").map(a=>'<i class="'+(v.includes(a)?'on':'')+'" title="'+L[a]+'">'+a+'</i>').join("")+'</span>' : '<span class="no">—</span>';
   const grups=[...new Set(PERMS.map(r=>r.g))];
-  const admin=false; // L'edició de permisos encara no està connectada als permisos del servidor (taula permisos).
+  const admin=!!(ME&&ME.rol==="supervisio");
   const ed=admin&&S.permEd;
   const val=(r,k)=> ed&&S.permEd[r.m]&&S.permEd[r.m][k]!==undefined ? S.permEd[r.m][k] : (r.p[k]||"");
   const cellE=(r,k)=>{ const v=val(r,k), lock=PERM_LOCK(r.m,k), canv=v!==permDef(r.m,k);
@@ -1187,9 +1207,9 @@ VIEWS.config = () => {
     if(lock) return '<span class="perms lock" title="No es pot canviar">'+"CEMB".split("").map(a=>'<i class="'+(v.includes(a)?'on':'')+'">'+a+'</i>').join("")+'</span>';
     return '<span class="perms'+(canv?' canviat':'')+'">'+"CEMB".split("").map(a=>'<button type="button" class="pb'+(v.includes(a)?' on':'')+'" data-pc="'+r.m+'|'+k+'|'+a+'" aria-pressed="'+v.includes(a)+'" aria-label="'+esc(ROLS[k]+' · '+r.n+' · '+L[a])+'">'+a+'</button>').join("")+'</span>'; };
   const nCanvis=ed?Object.entries(S.permEd).reduce((n,[m,o])=>n+Object.entries(o).filter(([k,v])=>v!==(PM[m].p[k]||"")).length,0):0;
-  const nPers=Object.values((D.config&&D.config.permisos)||{}).reduce((n,o)=>n+Object.keys(o).length,0);
+  const nPers=Object.values(permOverrides()).reduce((n,o)=>n+Object.keys(o).length,0);
   return '<div class="head"><div><h1>Rols i permisos</h1><p>Què pot fer cada perfil i com ho veu cadascú.</p></div>'+(admin&&!ed?'<button class="btn primary" id="permEd">Editar permisos</button>':'')+'</div>'+
-  (ed?'<section class="panel" style="border:2px solid var(--accent)"><div class="panel-h"><div><h2>Editant permisos</h2><p style="margin:2px 0 0;color:var(--muted);font-size:14px">Toca una lletra per activar-la o desactivar-la. Sense <b>C</b> (consulta) no hi ha cap altre permís. Les caselles amb contorn groc són diferents dels valors per defecte. La columna de Supervisió i la fila d\'Equip no es poden canviar.</p></div></div>'+
+  (ed?'<section class="panel" style="border:2px solid var(--accent)"><div class="panel-h"><div><h2>Editant permisos</h2><p style="margin:2px 0 0;color:var(--muted);font-size:14px">Toca una lletra per activar-la o desactivar-la. Sense <b>C</b> (consulta) no hi ha cap altre permís. Les caselles amb contorn groc són diferents dels valors per defecte. Bloquejades: la columna de Supervisió, la fila d\'Equip i l\'aprovació de comandes (ho controla el servidor).</p></div></div>'+
     '<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn primary" id="permSave"'+(nCanvis?'':' disabled')+'>Desar '+nCanvis+' canvi'+(nCanvis===1?'':'s')+'</button><button class="btn ghost" id="permCancel">Descartar</button>'+(nPers?'<button class="btn ghost danger" id="permReset" style="margin-left:auto">Tornar als valors per defecte</button>':'')+'</div></section>':'')+
   (admin&&!ed&&nPers?'<div class="note">Hi ha '+nPers+' permisos canviats respecte dels valors per defecte (amb contorn groc).</div>':'')+
     '<div class="legend"><span><span class="perms"><i class="on">C</i></span>Consulta</span><span><span class="perms"><i class="on">E</i></span>Enregistra</span><span><span class="perms"><i class="on">M</i></span>Modifica</span><span><span class="perms"><i class="on">B</i></span>Esborra (amb motiu)</span></div>'+
@@ -1219,12 +1239,8 @@ BIND.config = () => {
   const ps=$("#permSave"); if(ps) ps.onclick=()=>{ const canvis=[];
     Object.entries(S.permEd).forEach(([m,o])=>Object.entries(o).forEach(([k,v])=>{ if(v!==(PM[m].p[k]||"")) canvis.push([m,k,v]); }));
     if(!canvis.length) return;
-    confirmMotiu("Desar els canvis de permisos", canvis.length+" canvis. S'apliquen de seguida a tothom que tingui aquest perfil.", "Desar", m=>{
-      D.config.permisos=D.config.permisos||{};
-      canvis.forEach(([mm,k,v])=>{ const o=D.config.permisos[mm]=D.config.permisos[mm]||{}; if(v===permDef(mm,k)) delete o[k]; else o[k]=v; if(!Object.keys(o).length) delete D.config.permisos[mm]; });
-      logCanvi("Canvi de permisos", canvis.map(([mm,k,v])=>ROLS[k]+" · "+PM[mm].n+": "+(v||"cap")).join(" | "), m);
-      aplicaPermisos(); S.permEd=null; save(); render(); toast("Permisos desats."); }); };
-  const pr=$("#permReset"); if(pr) pr.onclick=()=>confirmMotiu("Tornar als valors per defecte","Es desfan tots els canvis de permisos.","Restaurar",m=>{ D.config.permisos={}; logCanvi("Permisos restaurats als valors per defecte","",m); aplicaPermisos(); S.permEd=null; save(); render(); toast("Permisos restaurats."); });
+    confirmMotiu("Desar els canvis de permisos", canvis.length+" canvis. S'apliquen a tothom que tingui aquest perfil.", "Desar", m=>desarPermisos(canvis, m, ok=>{ if(!ok) return; S.permEd=null; render(); toast("Permisos desats."); })); };
+  const pr=$("#permReset"); if(pr) pr.onclick=()=>confirmMotiu("Tornar als valors per defecte","Es desfan tots els canvis de permisos.","Restaurar",m=>restaurarPermisos(m, ok=>{ if(!ok) return; S.permEd=null; render(); toast("Permisos restaurats."); }));
 };
 
 /* ---------- Comandes a proveïdors ---------- */
