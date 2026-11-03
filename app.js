@@ -141,6 +141,13 @@ async function carregar(){
   if(!D.casals.length) D.casals=CASALS_DEF.map(c=>({...c}));
   LAST=toRecords(D);
   dataVer++;
+  await carregarNoms();
+}
+// Talleristes i voluntariat no llegeixen la taula de persones: el servidor només els dona el nom dels seus inscrits.
+async function carregarNoms(){
+  if(!ME || !["tallerista","voluntari"].includes(ME.rol)){ S._noms=null; return; }
+  try{ const {data,error}=await sb.rpc("noms_inscrits"); if(error) throw error; S._noms=Object.fromEntries((data||[]).map(x=>[x.id,{id:x.id,nom:x.nom||"",cognoms:x.cognoms||"",num:x.num,tel:""}])); }
+  catch(e){ S._noms={}; }
 }
 
 // ---- Desar: envia només el que ha canviat ----
@@ -233,7 +240,7 @@ const S = { rol:"pendent", casal:"tots", view:"inici", q:"", fq:"tots", eix:"tot
 try{ const r=localStorage.getItem("casals-ui"); if(r){ const o=JSON.parse(r); S.casal=o.casal||"tots"; S.view=o.view||"inici"; S.uiUser=o.user||null; } }catch(e){}
 
 /* ---------- Helpers de dades ---------- */
-const soci = id => D.socis.find(s=>s.id===id);
+const soci = id => D.socis.find(s=>s.id===id) || (S._noms&&S._noms[id]);
 const sala = id => D.sales.find(s=>s.id===id);
 const casal = id => D.casals.find(c=>c.id===id);
 const inCasal = x => S.casal==="tots" || (x.casal!==undefined ? x.casal : x.id)===S.casal;
@@ -262,14 +269,31 @@ function baixa(a, sid){
 function conflicte(salaId, dia, inici, fi, ignoreId){
   const a0=mins(inici), a1=mins(fi);
   const ov = (b0,b1)=> a0<mins(b1) && mins(b0)<a1;
-  const act = D.activitats.find(a=>a.id!==ignoreId && a.sala===salaId && a.dia===dia && ov(a.inici,a.fi));
+  const act = D.activitats.find(a=>a.id!==ignoreId && !a.data && a.sala===salaId && a.dia===dia && ov(a.inici,a.fi));
   if(act) return "Coincideix amb l'activitat «"+act.nom+"» ("+act.inici+"–"+act.fi+").";
   const r = D.reserves.find(r=>r.id!==ignoreId && r.sala===salaId && r.dia===dia && ov(r.inici,r.fi));
   if(r) return "Coincideix amb la reserva de "+r.entitat+" ("+r.inici+"–"+r.fi+").";
   return null;
 }
 
-
+/* Activitats puntuals (un sol dia, camp "data") i sessions anul·lades de les periòdiques (camp "anul"). */
+const esPunt = a => !!a.data;
+const anulada = (a,d) => (a.anul||[]).some(x=>x.d===d);
+const actEnData = (a,d) => esPunt(a) ? a.data===d : (wd(d)===a.dia && !anulada(a,d));
+const quan = a => esPunt(a) ? DIES7[wd(a.data)]+" "+fdata(a.data) : DIES[a.dia];
+const ordAct = (a,b) => (esPunt(a)-esPunt(b)) || (esPunt(a) ? a.data.localeCompare(b.data) : a.dia-b.dia) || mins(a.inici)-mins(b.inici);
+const lesMeves = a => !esResp() || S.simRol || (a.resp||[]).includes(S.user);
+/* Coincidències en una data concreta: activitats periòdiques (si aquella sessió no està anul·lada), puntuals i reserves. */
+function conflicteData(salaId, data, b0, b1, ignoreId){
+  const a1=mins(b1), ov=(x0,x1)=> mins(x0)<a1 && mins(b0)<mins(x1);
+  const p = D.activitats.find(a=>a.id!==ignoreId && a.sala===salaId && esPunt(a) && a.data===data && ov(a.inici,a.fi));
+  if(p) return {tipus:"puntual", act:p, txt:"Coincideix amb l'activitat puntual «"+p.nom+"» ("+p.inici+"–"+p.fi+")."};
+  const a = D.activitats.find(a=>a.id!==ignoreId && a.sala===salaId && !esPunt(a) && wd(data)===a.dia && !anulada(a,data) && ov(a.inici,a.fi));
+  if(a) return {tipus:"periodica", act:a, txt:"Coincideix amb l'activitat «"+a.nom+"» de cada "+DIES[a.dia].toLowerCase()+" ("+a.inici+"–"+a.fi+")."};
+  const r = D.reserves.find(r=>r.sala===salaId && wd(data)===r.dia && ov(r.inici,r.fi));
+  if(r) return {tipus:"reserva", txt:"Coincideix amb la reserva de "+r.entitat+" ("+r.inici+"–"+r.fi+")."};
+  return null;
+}
 const DIES7 = ["Dilluns","Dimarts","Dimecres","Dijous","Divendres","Dissabte","Diumenge"];
 const avuiIdx7 = () => (new Date().getDay()+6)%7;
 let partCache=null, partVer=-1;
@@ -306,8 +330,8 @@ function estatPersona(s){
 const fdata = s => new Date(s+"T12:00:00").toLocaleDateString("ca-ES",{day:"numeric",month:"short"});
 
 /* ---------- Permisos ---------- */
-const ROLS={supervisio:"Supervisió",direccio:"Coordinació",neteja:"Neteja",dinamitzador:"Dinamitzador/a",informador:"Informador/a",soci:"Persona usuària",ajuntament:"Ajuntament"};
-const ROLK=["supervisio","direccio","dinamitzador","informador","neteja","soci","ajuntament"];
+const ROLS={supervisio:"Supervisió",direccio:"Coordinació",neteja:"Neteja",dinamitzador:"Dinamitzador/a",informador:"Informador/a",soci:"Persona usuària",ajuntament:"Ajuntament",tallerista:"Tallerista",voluntari:"Voluntari/ària"};
+const ROLK=["supervisio","direccio","dinamitzador","informador","neteja","tallerista","voluntari","soci","ajuntament"];
 // C consulta · E enregistra · M modifica · B esborra
 const PERMS=[
   {g:"Persones",m:"persones",n:"Fitxa de la persona usuària",p:{direccio:"CEMB",dinamitzador:"CEM",informador:"CE",soci:"C",ajuntament:""},nota:"Informador/a: alta bàsica i consulta de contacte. Persona usuària: només la seva fitxa. Dinamitzador/a fa baixes, no esborra."},
@@ -334,14 +358,26 @@ const PERMS=[
   {g:"Sistema",m:"inici",n:"Tauler d'inici",p:{direccio:"C",dinamitzador:"C",informador:"C",soci:"",ajuntament:""}},
   {g:"Sistema",m:"config",n:"Rols, avisos i registre de canvis",p:{direccio:"CEMB",dinamitzador:"",informador:"",soci:"",ajuntament:""}}
 ];
-PERMS.forEach(r=>{ if(r.p.supervisio===undefined) r.p.supervisio=r.p.direccio; if(r.p.neteja===undefined) r.p.neteja=""; });
+PERMS.forEach(r=>{ if(r.p.supervisio===undefined) r.p.supervisio=r.p.direccio; ["neteja","tallerista","voluntari"].forEach(k=>{ if(r.p[k]===undefined) r.p[k]=""; }); });
+// Talleristes i voluntariat: només les activitats que tenen assignades, la llista d'inscrits (només el nom) i passar llista.
+["activitats","inscripcions"].forEach(m=>PERMS.find(r=>r.m===m).p.tallerista=PERMS.find(r=>r.m===m).p.voluntari="C");
+PERMS.find(r=>r.m==="llista").p.tallerista=PERMS.find(r=>r.m==="llista").p.voluntari="CEM";
+PERMS.find(r=>r.m==="activitats").nota="Talleristes i voluntariat: només les activitats que tenen assignades.";
+PERMS.find(r=>r.m==="llista").nota="Talleristes i voluntariat: veuen el nom dels inscrits (sense telèfon ni altres dades) i passen llista de les seves activitats.";
+/* Permisos editables per la Supervisió: els valors per defecte són els d'aquí dalt; els canvis es desen a D.config.permisos.
+   No es poden tocar la columna de Supervisió ni la fila d'Equip (només la Supervisió gestiona usuaris). */
+const PERMS_DEF=PERMS.map(r=>({m:r.m,p:{...r.p}}));
+const permDef=(m,k)=>((PERMS_DEF.find(x=>x.m===m)||{p:{}}).p[k]||"");
+const PERM_LOCK=(m,k)=> k==="supervisio" || m==="equip";
+function aplicaPermisos(){ const o=(D&&D.config&&D.config.permisos)||{}; PERMS.forEach(r=>{ const d=PERMS_DEF.find(x=>x.m===r.m); r.p={...d.p}; Object.entries(o[r.m]||{}).forEach(([k,v])=>{ if(!PERM_LOCK(r.m,k)) r.p[k]=v; }); }); }
+aplicaPermisos();
 const PM=Object.fromEntries(PERMS.map(r=>[r.m,r]));
 const esCoord = () => S.rol==="direccio"||S.rol==="supervisio";
-const CATS_ROL={neteja:["neteja"],informador:["neteja","alimentacio"],dinamitzador:["neteja","alimentacio"]};
+const CATS_ROL={neteja:["neteja"],informador:["neteja","alimentacio","farmaciola"],dinamitzador:["neteja","alimentacio","activitats","farmaciola"],tallerista:[],voluntari:[]};
 const catsPermeses = () => CATS_ROL[S.rol] || Object.keys(CATS_C);
-const PET_CAT={bar:"alimentacio",net:"neteja"};
+const PET_CAT={bar:"alimentacio",net:"neteja",far:"farmaciola",tal:"activitats"};
 const can=(m,a)=>{ const r=PM[m]; return !!r && (r.p[S.rol]||"").includes(a); };
-const ABAST={supervisio:"Els dos casals · tot el programa i els usuaris",neteja:"El seu casal · només comandes de neteja",direccio:"Els dos casals",dinamitzador:"El seu casal",informador:"El seu casal",soci:"Només les seves dades",ajuntament:"Els dos casals, només consulta"};
+const ABAST={supervisio:"Els dos casals · tot el programa i els usuaris",neteja:"El seu casal · només comandes de neteja",direccio:"Els dos casals",dinamitzador:"El seu casal",informador:"El seu casal",soci:"Només les seves dades",ajuntament:"Els dos casals, només consulta",tallerista:"Només les seves activitats · passar llista",voluntari:"Només les seves activitats · passar llista"};
 const NAVMOD={equip:"equip",inici:"inici",socis:"persones",seguiment:"seguiment",activitats:"activitats",sales:"reserves",comandes:"comandes",apats:"apats",manteniment:"incidencies",informes:"informes",config:"config"};
 const RULES=[
   ["#nouSoci,[data-go='socis-nou']","persones","E","h"],["#edSoci","persones","M","h"],["#delSoci","persones","B","h"],["#baixaSoci","persones","M","h"],
@@ -400,15 +436,16 @@ function render(){
   document.onkeydown=null; clearInterval(KS.clock); progIdle();
   S.rol = u.rol;
   if(u.casal&&u.casal!=="tots") S.casal=u.casal; else if(!S.casal) S.casal="tots";
-  if((S.rol==="dinamitzador"||S.rol==="informador"||S.rol==="neteja") && S.casal==="tots") S.casal="c1";
+  if((S.rol==="dinamitzador"||S.rol==="informador"||S.rol==="neteja"||esResp()) && S.casal==="tots") S.casal="c1";
   if(S.rol==="ajuntament"){ S.casal="tots"; S.view="informes"; }
   const nav = NAV.filter(n=> can(NAVMOD[n.id],"C") && (n.id!=="apats" || S.casal==="tots" || S.casal==="c2"));
+  if(!nav.length){ root.innerHTML=topbar()+'<main id="main"><div class="empty" style="margin:40px auto;max-width:520px">El teu perfil no té cap apartat assignat al programa. Parla amb la Direcció General.</div></main>'; bindTop(); return; }
   if(!nav.find(n=>n.id===S.view)) S.view=nav[0].id;
   NAVL = nav;
   const home = nav.find(n=>n.id==="inici");
   const modbar = S.view==="inici" ? '' : '<div class="modbar">'+(home?'<button class="back" data-nav="inici" aria-label="Tornar a l\'inici" title="Inici">'+ICON.back+'</button>':'')+
     '<nav class="dock" aria-label="Mòduls">'+nav.filter(n=>n.id!=="inici").map(n=>'<button class="m-'+n.id+'" data-nav="'+n.id+'"'+(S.view===n.id?' aria-current="page"':'')+'><i>'+ICON[n.i]+'</i>'+n.t+'</button>').join("")+'</nav></div>';
-  root.innerHTML = '<div class="shell">'+topbar(false)+modbar+'<main class="content" id="view">'+VIEWS[S.view]()+'</main><footer class="foot"><div class="fl"><small>Gestionat</small><img src="'+LOGO_AM+'" alt="Ave Maria Fundació" style="height:52px;padding:6px 10px"></div><div class="fl"><small>Titularitat</small><img src="'+LOGO_AJT+'" alt="Ajuntament de Sant Pere de Ribes"></div><span>Gestió: Fundació Ave Maria · Titularitat: Ajuntament de Sant Pere de Ribes<br>Prototip amb dades d\'exemple</span></footer></div>';
+  root.innerHTML = '<div class="shell">'+topbar(false)+modbar+'<main class="content" id="view">'+VIEWS[S.view]()+'</main><footer class="foot"><div class="fl"><small>Gestionat</small><img src="'+LOGO_AM+'" alt="Ave Maria Fundació" style="height:52px;padding:6px 10px"></div><div class="fl"><small>Titularitat</small><img src="'+LOGO_AJT+'" alt="Ajuntament de Sant Pere de Ribes"></div><span>Gestió: Fundació Ave Maria · Titularitat: Ajuntament de Sant Pere de Ribes</span></footer></div>';
   const h1=root.querySelector("#view .head h1"); const cur=NAV.find(n=>n.id===S.view);
   if(h1 && S.view!=="inici" && cur) h1.insertAdjacentHTML("afterbegin",'<span class="h-ic m-'+cur.id+'" aria-hidden="true">'+ICON[cur.i]+'</span>');
   root.querySelectorAll("[data-nav]").forEach(b=>b.onclick=()=>{ S.view=b.dataset.nav; render(); window.scrollTo(0,0); });
@@ -442,7 +479,7 @@ const VIEWS = {}, BIND = {};
 
 /* ---------- Accés: correu i contrasenya, doble factor i tauleta amb PIN ---------- */
 const KELIO="https://funave.kelio.io/open/login";
-const ROLS_PIN=["dinamitzador","informador","neteja"];
+const ROLS_PIN=["dinamitzador","informador","neteja","tallerista","voluntari"];
 const esCoordRol = r => r==="supervisio"||r==="direccio";
 
 function marc(html, ample){
@@ -636,7 +673,8 @@ const nomT = p => p ? (p.nom||p.email||"—") : "—";
 const casalT = p => !p.casal ? "—" : p.casal==="tots" ? "Els dos casals" : ((D&&casal(p.casal))||{nom:p.casal}).nom;
 const trebsVisibles = () => (S._usuaris||[]).filter(t=>t.rol!=="tauleta" && (S.casal==="tots"||t.casal==="tots"||t.casal===S.casal));
 const esSup = () => ME && ME.rol==="supervisio";
-const ROLS_ALTA=[["supervisio","Supervisió (Direcció General)"],["direccio","Coordinació"],["dinamitzador","Animació sociocultural"],["informador","Informador/a"],["neteja","Neteja"],["ajuntament","Ajuntament (només informes)"],["pendent","Sense accés"]];
+const esResp = () => S.rol==="tallerista"||S.rol==="voluntari";
+const ROLS_ALTA=[["supervisio","Supervisió (Direcció General)"],["direccio","Coordinació"],["dinamitzador","Animació sociocultural"],["informador","Informador/a"],["neteja","Neteja"],["tallerista","Tallerista (passa llista de les seves activitats)"],["voluntari","Voluntari/ària (passa llista de les seves activitats)"],["ajuntament","Ajuntament (només informes)"],["pendent","Sense accés"]];
 async function carregarUsuaris(){
   try{
     if(esSup()){ const r=await fn("usuaris",{accio:"llistar"}); S._usuaris=r.usuaris; }
@@ -655,7 +693,7 @@ VIEWS.equip = () => {
     '<section class="panel"><div class="panel-h"><h2>Persones amb accés al programa</h2>'+(esSup()?'<button class="btn sm primary" id="nouUs">'+ICON.plus+'Nova persona</button>':'')+'</div>'+
     (esSup()?'':'<p class="note" style="margin:0">Només la Direcció General (Supervisió) dona d\'alta i de baixa usuaris i canvia perfils i PIN.</p>')+
     '<div class="list">'+(persones.map(fila).join("")||'<div class="empty">'+(us?'Encara no hi ha ningú.':'Carregant…')+'</div>')+'</div></section>'+
-    (esSup()?'<section class="panel"><div class="panel-h"><div><h2>Tauletes dels casals</h2><p style="margin:2px 0 0;color:var(--muted);font-size:14px">Compte del dispositiu de cada casal. Hi entren amb PIN Animació, Informació i Neteja.</p></div><button class="btn sm" id="nouTau">'+ICON.plus+'Nova tauleta</button></div><div class="list">'+(tauletes.map(fila).join("")||'<div class="empty">Cap tauleta configurada.</div>')+'</div></section>':'');
+    (esSup()?'<section class="panel"><div class="panel-h"><div><h2>Tauletes dels casals</h2><p style="margin:2px 0 0;color:var(--muted);font-size:14px">Compte del dispositiu de cada casal. Hi entren amb PIN Animació, Informació, Neteja, talleristes i voluntariat.</p></div><button class="btn sm" id="nouTau">'+ICON.plus+'Nova tauleta</button></div><div class="list">'+(tauletes.map(fila).join("")||'<div class="empty">Cap tauleta configurada.</div>')+'</div></section>':'');
 };
 function formUsuari(id){
   const t=id?treb(id):{nom:"",email:"",rol:"informador",casal:S.casal==="tots"?"c1":S.casal,actiu:true};
@@ -748,7 +786,7 @@ const norm = t => String(t||"").normalize("NFD").replace(/[̀-ͯ]/g,"").toLowerC
 const horaAra = () => { const n=new Date(); return String(n.getHours()).padStart(2,"0")+":"+String(n.getMinutes()).padStart(2,"0"); };
 const arribadesAvui = () => { const AV=isoAvui(); return D.casals.filter(inCasal).flatMap(c=>(D.arribades[c.id+"|"+AV]||[]).map(x=>Object.assign({c:c.id},x))).sort((a,b)=>b.h.localeCompare(a.h)); };
 const arribadaDe = sid => { const s=soci(sid); return s ? (D.arribades[s.casal+"|"+isoAvui()]||[]).find(x=>x.s===sid) : null; };
-const actsAvuiDe = sid => esAvuiLaborable() ? D.activitats.filter(a=>a.dia===avuiIdx() && a.inscrits.includes(sid)).sort((a,b)=>mins(a.inici)-mins(b.inici)) : [];
+const actsAvuiDe = sid => D.activitats.filter(a=>actEnData(a,isoAvui()) && a.inscrits.includes(sid)).sort((a,b)=>mins(a.inici)-mins(b.inici));
 function marcarArribada(sid){
   const s=soci(sid), AV=isoAvui(), k=s.casal+"|"+AV; const arr=D.arribades[k]||(D.arribades[k]=[]);
   if(arr.find(x=>x.s===sid)) return; const h=horaAra(); arr.push({s:sid,h});
@@ -830,7 +868,7 @@ VIEWS.inici = () => {
   const socis=D.socis.filter(inCasal), acts=D.activitats.filter(inCasal);
   const places=acts.reduce((t,a)=>t+a.places,0), ins=acts.reduce((t,a)=>t+a.inscrits.length,0);
   const espera=acts.reduce((t,a)=>t+a.espera.length,0), alrt=socis.filter(s=>alertesDe(s).length).length, acol=socis.filter(s=>s.acollida&&!s.acollida.completada).length;
-  const di=avuiIdx(); const avui=acts.filter(a=>a.dia===di).sort((a,b)=>mins(a.inici)-mins(b.inici));
+  const dVista=esAvuiLaborable()?isoAvui():addDays(isoAvui(),7-avuiIdx7()); const avui=acts.filter(a=>actEnData(a,dVista)).sort((a,b)=>mins(a.inici)-mins(b.inici));
   const plenes=acts.filter(a=>a.inscrits.length>=a.places).sort((a,b)=>b.espera.length-a.espera.length);
   const nomCasal = S.casal==="tots" ? "Tots els casals" : casal(S.casal).nom;
   const perEix = Object.keys(EIXOS).map(e=>{ const x=acts.filter(a=>a.eix===e); return {e, n:x.length, ins:x.reduce((t,a)=>t+a.inscrits.length,0)}; });
@@ -860,7 +898,7 @@ VIEWS.inici = () => {
     perEix.map(p=>'<div class="row" style="flex-wrap:wrap;gap:8px"><div class="t" style="flex-basis:100%;display:flex;justify-content:space-between"><b style="display:inline">'+EIXOS[p.e]+'</b><span class="num">'+p.ins+' inscripcions</span></div><div class="bar" style="flex:1"><i style="width:'+(p.ins/maxE*100)+'%;background:var(--'+p.e+')"></i></div></div>').join("")+
   '</div></section></div>'+
   '<section class="panel"><div class="panel-h"><h2>Activitats plenes</h2><button class="btn sm ghost" data-go="activitats">Veure totes</button></div><div class="list">'+
-    (plenes.length? plenes.map(a=>'<div class="row"><div class="t"><b>'+esc(a.nom)+'</b><span>'+DIES[a.dia]+' '+a.inici+' · '+esc(sala(a.sala).nom)+'</span></div><span class="chip warn">'+a.espera.length+' en espera</span></div>').join("") : '<div class="empty">Encara queden places a totes les activitats.</div>')+
+    (plenes.length? plenes.map(a=>'<div class="row"><div class="t"><b>'+esc(a.nom)+'</b><span>'+quan(a)+' '+a.inici+' · '+esc(sala(a.sala).nom)+'</span></div><span class="chip warn">'+a.espera.length+' en espera</span></div>').join("") : '<div class="empty">Encara queden places a totes les activitats.</div>')+
   '</div></section>';
 };
 function serveisAvui(){
@@ -903,10 +941,10 @@ function fitxaSoci(id){
   '<div class="sens"><div class="section-t">Participació</div><dl class="dl" style="margin-top:8px"><dt>Darrera assistència</dt><dd>'+(pp&&pp.last?fdata(pp.last)+' ('+diesEntre(pp.last,isoAvui())+' dies)':'Cap registrada')+'</dd><dt>Assistències 30 dies</dt><dd class="num">'+(pp?pp.n30:0)+'</dd><dt>Membre de l\'entitat</dt><dd>'+(s.entitat?'Sí':'No')+'</dd><dt>Viu sol/a</dt><dd>'+(s.viuSol?'Sí':'No')+'</dd></dl></div>'+
   (!ac.completada?'<div class="sens"><div class="section-t">Acollida</div>'+passosAcollida(s)+'</div>':'')+
   '<div class="sens"><div class="section-t">Seguiments ('+segs.length+')</div><div class="list">'+(segs.slice(0,4).map(g=>'<div class="row"><div class="t"><b>'+esc(g.tipus)+' · '+fdata(g.data)+'</b><span style="white-space:normal">'+esc(g.nota)+'</span></div></div>').join("")||'<div class="empty">Sense seguiments registrats.</div>')+'</div></div>'+
-  '<div><div class="section-t">Contacte</div><dl class="dl" style="margin-top:8px"><dt>Telèfon</dt><dd class="num">'+esc(s.tel)+'</dd><dt>Domicili</dt><dd>'+(s.domicili?esc(s.domicili):'—')+'</dd><dt>Correu</dt><dd>'+(s.email?esc(s.email):'—')+'</dd><dt>Persona de referència</dt><dd>'+(s.contacte?esc(s.contacte):'—')+'</dd></dl></div>'+
+  '<div><div class="section-t">Contacte</div><dl class="dl" style="margin-top:8px"><dt>Telèfon</dt><dd class="num">'+esc(s.tel)+'</dd><dt>Domicili</dt><dd>'+(s.domicili?esc(s.domicili):'—')+'</dd><dt>Correu</dt><dd>'+(s.email?esc(s.email):'—')+'</dd><dt>Persona de referència</dt><dd>'+(s.contacte?esc(s.contacte):'—')+'</dd><dt>Derivat de</dt><dd>'+(s.derivat?esc(s.derivat):'—')+'</dd></dl></div>'+
   '<div><div class="section-t">Autoritzacions</div><div style="display:flex;flex-direction:column;gap:8px;margin-top:8px">'+aut.map(a=>'<div style="display:flex;justify-content:space-between"><span>'+a[1]+'</span>'+(s.aut[a[0]]?'<span class="chip good">Signada</span>':'<span class="chip">No</span>')+'</div>').join("")+'</div></div>'+
   (s.obs?'<div><div class="section-t">Observacions per a l\'activitat</div><p class="note" style="margin:8px 0 0">'+esc(s.obs)+'</p></div>':'')+
-  '<div><div class="section-t">Activitats ('+acts.length+')</div><div class="list" style="margin-top:4px">'+(acts.length? acts.map(a=>'<div class="row"><div class="t"><b>'+esc(a.nom)+'</b><span>'+DIES[a.dia]+' '+a.inici+'</span></div><button class="btn sm ghost danger" data-baixa="'+a.id+'">Donar de baixa</button></div>').join("") : '<div class="empty">Encara no fa cap activitat.</div>')+
+  '<div><div class="section-t">Activitats ('+acts.length+')</div><div class="list" style="margin-top:4px">'+(acts.length? acts.map(a=>'<div class="row"><div class="t"><b>'+esc(a.nom)+'</b><span>'+quan(a)+' '+a.inici+'</span></div><button class="btn sm ghost danger" data-baixa="'+a.id+'">Donar de baixa</button></div>').join("") : '<div class="empty">Encara no fa cap activitat.</div>')+
   esp.map(a=>'<div class="row"><div class="t"><b>'+esc(a.nom)+'</b><span>Llista d\'espera · posició '+(a.espera.indexOf(id)+1)+'</span></div><span class="chip warn">Espera</span></div>').join("")+'</div></div>'+
   '<button class="btn" id="insSoci">'+ICON.plus+'Inscriure a una activitat</button>'+
   '<p class="note" style="margin:0">Les dades de salut no es guarden aquí. Només observacions pràctiques per a l\'activitat, amb consentiment.</p>';
@@ -918,7 +956,7 @@ function fitxaSoci(id){
   const fa=o.querySelector("#fsAco"); if(fa) fa.onclick=()=>formAcollida(id);
   o.querySelector("#insSoci").onclick=()=>{
     const disp=D.activitats.filter(a=>a.casal===s.casal && !a.inscrits.includes(id) && !a.espera.includes(id));
-    overlay(hdr("Inscriure "+s.nom,"Tria l'activitat")+'<div class="list">'+disp.map(a=>'<div class="row"><div class="t"><b>'+esc(a.nom)+'</b><span>'+DIES[a.dia]+' '+a.inici+' · '+a.inscrits.length+'/'+a.places+'</span></div><button class="btn sm '+(a.inscrits.length<a.places?'primary':'')+'" data-a="'+a.id+'">'+(a.inscrits.length<a.places?'Inscriure':'A l\'espera')+'</button></div>').join("")+'</div>');
+    overlay(hdr("Inscriure "+s.nom,"Tria l'activitat")+'<div class="list">'+disp.map(a=>'<div class="row"><div class="t"><b>'+esc(a.nom)+'</b><span>'+quan(a)+' '+a.inici+' · '+a.inscrits.length+'/'+a.places+'</span></div><button class="btn sm '+(a.inscrits.length<a.places?'primary':'')+'" data-a="'+a.id+'">'+(a.inscrits.length<a.places?'Inscriure':'A l\'espera')+'</button></div>').join("")+'</div>');
     document.querySelectorAll(".modal [data-a]").forEach(b=>b.onclick=()=>{ const a=D.activitats.find(x=>x.id===b.dataset.a); const r=inscriure(a,id); toast(r==="inscrit"? s.nom+" inscrit/a a "+a.nom+"." : s.nom+" a la llista d'espera (posició "+a.espera.length+")."); render(); fitxaSoci(id); });
   };
 }
@@ -927,7 +965,7 @@ function formSoci(id){
   const s = id ? soci(id) : {nom:"",cognoms:"",naix:"1950-01-01",tel:"",domicili:"",email:"",contacte:"",casal:S.casal==="tots"?"c1":S.casal,entitat:false,viuSol:false,aut:{imatge:false,dades:true,domiciliacio:false},obs:""};
   const f=(k,l,t,full)=>'<div class="field'+(full?' full':'')+'"><label for="f_'+k+'">'+l+'</label><input id="f_'+k+'" type="'+(t||"text")+'" value="'+esc(s[k])+'"></div>';
   overlay(hdr(id?"Editar persona":"Nova persona usuària", id?"Núm. "+s.num:"Alta")+
-  '<form class="form" id="fs" novalidate>'+f("nom","Nom")+f("cognoms","Cognoms")+f("naix","Data de naixement","date")+f("tel","Telèfon","tel")+f("domicili","Domicili","text",true)+f("email","Correu (opcional)","email",true)+f("contacte","Persona de referència (opcional)","text",true)+
+  '<form class="form" id="fs" novalidate>'+f("nom","Nom")+f("cognoms","Cognoms")+f("naix","Data de naixement","date")+f("tel","Telèfon","tel")+f("domicili","Domicili","text",true)+f("email","Correu (opcional)","email",true)+f("contacte","Persona de referència (opcional)","text",true)+f("derivat","Derivat de (opcional)","text",true)+
   '<div class="field"><label for="f_casal">Casal</label><select id="f_casal">'+D.casals.map(c=>'<option value="'+c.id+'"'+(s.casal===c.id?' selected':'')+'>'+esc(c.nom)+'</option>').join("")+'</select></div>'+
   '<label class="check" style="align-self:end;padding-bottom:10px"><input type="checkbox" id="f_entitat"'+(s.entitat?' checked':'')+'>Membre de l\'entitat del casal</label>'+
   '<label class="check full"><input type="checkbox" id="f_viusol"'+(s.viuSol?' checked':'')+'>Viu sol/a <span style="color:var(--muted);font-size:13px">(serveix per detectar solitud; cal ampliar l\'Annex 4)</span></label>'+
@@ -945,7 +983,7 @@ function formSoci(id){
     if(!v("nom")||!v("cognoms")||!v("tel")){ const er=$("#ferr"); er.textContent="Cal omplir nom, cognoms i telèfon."; er.hidden=false; return; }
     if(!$("#f_a_dades").checked){ const er=$("#ferr"); er.textContent="Sense l'autorització de tractament de dades no es pot donar d'alta."; er.hidden=false; return; }
     const obj = id ? s : {id:uid("p"), num:Math.max(...D.socis.map(x=>x.num))+1, alta:isoAvui(), acollida:{completada:false,entrevista:null,benvinguda:false,referent:null,revisio:null,interessos:[]}};
-    Object.assign(obj,{nom:v("nom"),cognoms:v("cognoms"),naix:v("naix")||"1950-01-01",tel:v("tel"),domicili:v("domicili"),email:v("email"),contacte:v("contacte"),casal:v("casal"),entitat:$("#f_entitat").checked,viuSol:$("#f_viusol").checked,obs:v("obs"),
+    Object.assign(obj,{nom:v("nom"),cognoms:v("cognoms"),naix:v("naix")||"1950-01-01",tel:v("tel"),domicili:v("domicili"),email:v("email"),contacte:v("contacte"),derivat:v("derivat"),casal:v("casal"),entitat:$("#f_entitat").checked,viuSol:$("#f_viusol").checked,obs:v("obs"),
       aut:{imatge:$("#f_a_imatge").checked,dades:true,domiciliacio:$("#f_a_domiciliacio").checked}});
     if(!id) D.socis.unshift(obj); save(); closeOverlay();
     toast(id? "Canvis desats." : obj.nom+" té el núm. "+obj.num+". Comença l'acollida."); if(!id){ S.view="socis"; } render(); if(id) fitxaSoci(id);
@@ -953,12 +991,16 @@ function formSoci(id){
 }
 
 VIEWS.activitats = () => {
-  const acts=D.activitats.filter(inCasal).filter(a=>S.eix==="tots"||a.eix===S.eix).sort((a,b)=>a.dia-b.dia||mins(a.inici)-mins(b.inici));
-  return '<div class="head"><div><h1>Activitats</h1><p>Programació setmanal per eixos d\'envelliment actiu.</p></div><button class="btn primary" id="novaAct">'+ICON.plus+'Nova activitat</button></div>'+
-  '<div class="filters" role="group" aria-label="Eix">'+[["tots","Tots els eixos"]].concat(Object.entries(EIX_C)).map(f=>'<button data-eix="'+f[0]+'" aria-pressed="'+(S.eix===f[0])+'">'+f[1]+'</button>').join("")+'</div>'+
+  const lim=addDays(isoAvui(),-7);
+  const acts=D.activitats.filter(inCasal).filter(lesMeves).filter(a=>S.eix==="tots"||(S.eix==="punt"?esPunt(a):a.eix===S.eix)).filter(a=>!esPunt(a)||a.data>=lim).sort(ordAct);
+  const prop=a=>(a.anul||[]).filter(x=>x.d>=isoAvui()).sort((x,y)=>x.d.localeCompare(y.d));
+  return '<div class="head"><div><h1>'+(esResp()?'Les teves activitats':'Activitats')+'</h1><p>'+(esResp()?'Consulta qui hi ha inscrit i passa llista.':'Programació setmanal i activitats puntuals per eixos d\'envelliment actiu.')+'</p></div><button class="btn primary" id="novaAct">'+ICON.plus+'Nova activitat</button></div>'+
+  '<div class="filters" role="group" aria-label="Eix">'+[["tots","Tots els eixos"]].concat(Object.entries(EIX_C)).concat([["punt","Puntuals"]]).map(f=>'<button data-eix="'+f[0]+'" aria-pressed="'+(S.eix===f[0])+'">'+f[1]+'</button>').join("")+'</div>'+
+  (esResp()&&!acts.length?'<div class="empty">Encara no tens cap activitat assignada. Parla amb la coordinació.</div>':'')+
   '<div class="cards">'+acts.map(a=>{ const full=a.inscrits.length>=a.places, pct=Math.min(100,a.inscrits.length/a.places*100);
     return '<article class="card"><div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start"><h3>'+esc(a.nom)+'</h3>'+eixChip(a.eix)+'</div>'+
-    '<div class="meta"><span>'+DIES[a.dia]+' · '+a.inici+'–'+a.fi+'</span><span>'+esc(sala(a.sala).nom)+(S.casal==="tots"?' · '+esc(casal(a.casal).nom):'')+'</span><span>'+esc(a.prof)+' · '+(a.preu?eur(a.preu)+' / mes':'Gratuïta')+(a.comp?' · Complementària':'')+'</span></div>'+
+    (esPunt(a)?'<div><span class="chip" style="background:var(--accent-soft,#EEE8FF);color:var(--accent,#6C4BD8)">Puntual'+(a.data<isoAvui()?' · feta':'')+'</span></div>':'')+(prop(a).length?'<div>'+prop(a).slice(0,2).map(x=>'<span class="chip warn">No es fa '+fdata(x.d)+'</span> ').join("")+'</div>':'')+
+    '<div class="meta"><span>'+quan(a)+' · '+a.inici+'–'+a.fi+'</span><span>'+esc(sala(a.sala).nom)+(S.casal==="tots"?' · '+esc(casal(a.casal).nom):'')+'</span><span>'+esc(a.prof)+' · '+(a.preu?eur(a.preu)+(esPunt(a)?'':' / mes'):'Gratuïta')+(a.comp?' · Complementària':'')+'</span></div>'+
     '<div><div class="places"><span class="num"><b>'+a.inscrits.length+'</b> / '+a.places+' places</span>'+(full?'<span class="chip warn">Plena · '+a.espera.length+' en espera</span>':'<span style="color:var(--muted)">'+(a.places-a.inscrits.length)+' lliures</span>')+'</div><div class="bar'+(full?' full':'')+'" style="margin-top:8px"><i style="width:'+pct+'%"></i></div></div>'+
     '<div class="actions"><button class="btn sm primary" data-ins="'+a.id+'">Inscriure</button><button class="btn sm" data-llista="'+a.id+'">Llista</button></div></article>'; }).join("")+'</div>';
 };
@@ -967,59 +1009,105 @@ BIND.activitats = () => {
   document.querySelectorAll("[data-ins]").forEach(b=>b.onclick=()=>inscriureModal(b.dataset.ins));
   document.querySelectorAll("[data-llista]").forEach(b=>b.onclick=()=>llistaAct(b.dataset.llista));
   $("#novaAct").onclick=()=>formAct();
+  if(esResp()){ const n=$("#novaAct"); if(n) n.hidden=true; }
 };
 function inscriureModal(aid, q){
   const a=D.activitats.find(x=>x.id===aid); q=q||"";
   const cand=D.socis.filter(s=>s.casal===a.casal && !a.inscrits.includes(s.id) && !a.espera.includes(s.id) && (!q||nomComplet(s).toLowerCase().includes(q.toLowerCase())));
   const full=a.inscrits.length>=a.places;
-  overlay(hdr("Inscriure a "+a.nom, DIES[a.dia]+" "+a.inici)+(full?'<div class="note">Activitat plena. Les noves inscripcions van a la llista d\'espera i entren automàticament quan algú es dona de baixa.</div>':'<div class="note">Queden '+(a.places-a.inscrits.length)+' places.</div>')+
+  overlay(hdr("Inscriure a "+a.nom, quan(a)+" "+a.inici)+(full?'<div class="note">Activitat plena. Les noves inscripcions van a la llista d\'espera i entren automàticament quan algú es dona de baixa.</div>':'<div class="note">Queden '+(a.places-a.inscrits.length)+' places.</div>')+
   '<label class="search">'+ICON.search+'<input id="qi" type="search" placeholder="Cerca soci" value="'+esc(q)+'" aria-label="Cerca soci"></label><div class="list">'+
   (cand.slice(0,40).map(s=>'<div class="row"><div class="who" style="flex:1"><span class="avatar">'+inicials(s)+'</span><div>'+esc(nomComplet(s))+'<small>Núm. '+s.num+'</small></div></div><button class="btn sm '+(full?'':'primary')+'" data-s="'+s.id+'">'+(full?'A l\'espera':'Inscriure')+'</button></div>').join("")||'<div class="empty">No hi ha socis per inscriure.</div>')+'</div>');
   const qi=$("#qi"); qi.oninput=()=>{ const p=qi.selectionStart; inscriureModal(aid, qi.value); const n=$("#qi"); n.focus(); n.setSelectionRange(p,p); };
   document.querySelectorAll(".modal [data-s]").forEach(b=>b.onclick=()=>{ const s=soci(b.dataset.s); const r=inscriure(a,s.id); toast(r==="inscrit"? s.nom+" inscrit/a." : s.nom+" a la llista d'espera (posició "+a.espera.length+")."); render(); inscriureModal(aid, $("#qi")?$("#qi").value:""); });
 }
-function darreraSessio(a){ let d=isoAvui(); for(let i=0;i<7;i++){ if(wd(d)===a.dia) return d; d=addDays(d,-1); } return d; }
+function darreraSessio(a){ if(esPunt(a)) return a.data; let d=isoAvui(); for(let i=0;i<35;i++){ if(wd(d)===a.dia && !anulada(a,d)) return d; d=addDays(d,-1); } return d; }
+function properesSessions(a,n){ const out=[]; let d=isoAvui(); for(let i=0;i<120&&out.length<n;i++){ if(wd(d)===a.dia && !anulada(a,d)) out.push(d); d=addDays(d,1); } return out; }
+function anularSessio(aid){
+  const a=D.activitats.find(x=>x.id===aid), ds=properesSessions(a,10), fets=(a.anul||[]).filter(x=>x.d>=isoAvui()).sort((x,y)=>x.d.localeCompare(y.d));
+  overlay(hdr("Anul·lar una sessió", a.nom+" · cada "+DIES[a.dia].toLowerCase())+'<p class="note" style="margin:0">Només s\'anul·la la sessió del dia que triïs. L\'activitat continua igual les altres setmanes.</p>'+
+  '<form class="form" id="fan" novalidate><div class="field"><label for="an_d">Sessió</label><select id="an_d">'+ds.map(d=>'<option value="'+d+'">'+DIES7[wd(d)]+" "+fdata(d)+'</option>').join("")+'</select></div>'+
+  '<div class="field"><label for="an_m">Motiu</label><input id="an_m" placeholder="Ex.: festiu, activitat puntual a la sala"></div>'+
+  '<div class="full alert" id="anerr" hidden></div><div class="m-f full"><button type="button" class="btn ghost" id="anBack">Tornar</button><button class="btn danger" type="submit">Anul·lar la sessió</button></div></form>'+
+  (fets.length?'<div><div class="section-t">Sessions anul·lades</div><div class="list">'+fets.map(x=>'<div class="row"><div class="t"><b>'+DIES7[wd(x.d)]+" "+fdata(x.d)+'</b><span>'+esc(x.m||"")+'</span></div><button class="btn sm" data-rec="'+x.d+'">Recuperar</button></div>').join("")+'</div></div>':''));
+  $("#anBack").onclick=()=>llistaAct(aid);
+  $("#fan").onsubmit=e=>{ e.preventDefault(); const d=$("#an_d").value, m=$("#an_m").value.trim(); if(!d) return; if(m.length<3){ const er=$("#anerr"); er.textContent="Indica el motiu."; er.hidden=false; return; }
+    a.anul=a.anul||[]; a.anul.push({d,m}); logCanvi("Sessió anul·lada",a.nom+" · "+fdata(d),m); save(); toast("Sessió del "+fdata(d)+" anul·lada. Les altres setmanes no canvien."); render(); llistaAct(aid); };
+  document.querySelectorAll(".modal [data-rec]").forEach(b=>b.onclick=()=>{ a.anul=a.anul.filter(x=>x.d!==b.dataset.rec); logCanvi("Sessió recuperada",a.nom+" · "+fdata(b.dataset.rec)); save(); toast("Sessió recuperada."); render(); anularSessio(aid); });
+}
 function llistaAct(aid){
   const a=D.activitats.find(x=>x.id===aid); const ses=darreraSessio(a), key=a.id+"|"+ses, pres=D.assist[key]||[];
-  overlay(hdr(a.nom, DIES[a.dia]+" "+a.inici+"–"+a.fi+" · "+sala(a.sala).nom)+
-  (can("activitats","B")?'<div style="display:flex;justify-content:flex-end"><button class="btn sm ghost danger" id="delAct">Esborrar activitat</button></div>':'')+
-  '<div class="note">Passar llista de la sessió de '+DIES[a.dia].toLowerCase()+' '+fdata(ses)+': '+pres.length+' de '+a.inscrits.length+' presents.</div>'+
-  '<div><div class="section-t">Inscrits ('+a.inscrits.length+'/'+a.places+')</div><div class="list">'+(a.inscrits.map((id,i)=>{const s=soci(id); const hi=pres.includes(id); return '<div class="row"><span class="num" style="width:22px;color:var(--muted)">'+(i+1)+'</span><div class="t"><b>'+esc(nomComplet(s))+'</b><span class="num">'+esc(s.tel)+'</span></div><button class="tog" data-pl="'+id+'" aria-pressed="'+hi+'">'+(hi?'Present':'Absent')+'</button><button class="btn sm ghost danger" data-b="'+id+'">Baixa</button></div>';}).join("")||'<div class="empty">Encara no hi ha inscrits.</div>')+'</div></div>'+
+  overlay(hdr(a.nom, quan(a)+" "+a.inici+"–"+a.fi+" · "+sala(a.sala).nom)+
+  (can("activitats","M")||can("activitats","B")?'<div style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap">'+(can("activitats","M")?'<button class="btn sm" id="edAct">Editar</button>'+(esPunt(a)?'':'<button class="btn sm" id="anAct">Anul·lar una sessió</button>'):'')+(can("activitats","B")?'<button class="btn sm ghost danger" id="delAct">Esborrar activitat</button>':'')+'</div>':'')+
+  '<div class="note">Passar llista de la sessió de '+DIES7[wd(ses)].toLowerCase()+' '+fdata(ses)+': '+pres.length+' de '+a.inscrits.length+' presents.</div>'+
+  '<div><div class="section-t">Inscrits ('+a.inscrits.length+'/'+a.places+')</div><div class="list">'+(a.inscrits.map((id,i)=>{const s=soci(id); const hi=pres.includes(id); return '<div class="row"><span class="num" style="width:22px;color:var(--muted)">'+(i+1)+'</span><div class="t"><b>'+esc(nomComplet(s))+'</b>'+(can("persones","C")?'<span class="num">'+esc(s.tel)+'</span>':'')+'</div><button class="tog" data-pl="'+id+'" aria-pressed="'+hi+'">'+(hi?'Present':'Absent')+'</button><button class="btn sm ghost danger" data-b="'+id+'">Baixa</button></div>';}).join("")||'<div class="empty">Encara no hi ha inscrits.</div>')+'</div></div>'+
   '<div><div class="section-t">Llista d\'espera ('+a.espera.length+')</div><div class="list">'+(a.espera.map((id,i)=>{const s=soci(id); return '<div class="row"><span class="chip warn num">'+(i+1)+'</span><div class="t"><b>'+esc(nomComplet(s))+'</b><span>Entrarà quan quedi una plaça</span></div><button class="btn sm ghost" data-b="'+id+'">Treure</button></div>';}).join("")||'<div class="empty">Ningú en espera.</div>')+'</div></div>');
   document.querySelectorAll(".modal [data-b]").forEach(b=>b.onclick=()=>{ const p=baixa(a,b.dataset.b); toast(p? soci(p).nom+" entra des de la llista d'espera." : "Fet."); render(); llistaAct(aid); });
+  const ea=$("#edAct"); if(ea) ea.onclick=()=>formAct(aid);
+  const aa=$("#anAct"); if(aa) aa.onclick=()=>anularSessio(aid);
   const da=$("#delAct"); if(da) da.onclick=()=>confirmMotiu("Esborrar "+a.nom,"Se n'esborren les inscripcions i la llista d'espera. Si només s'atura, millor no esborrar-la.","Esborrar",m=>{ D.activitats=D.activitats.filter(x=>x.id!==a.id); D.rebuts=D.rebuts.filter(r=>r.act!==a.id||D.mesosTancats[r.mes]); logCanvi("Esborrat d'activitat",a.nom+" · "+casal(a.casal).curt,m); save(); toast("Activitat esborrada."); render(); });
   document.querySelectorAll(".modal [data-pl]").forEach(b=>b.onclick=()=>{ const arr=D.assist[key]||(D.assist[key]=[]); const x=b.dataset.pl; const k=arr.indexOf(x); if(k>=0) arr.splice(k,1); else arr.push(x); save(); llistaAct(aid); });
 }
-function formAct(){
-  const cs = S.casal==="tots" ? "c1" : S.casal;
+function formAct(id){
+  const a0 = id ? D.activitats.find(x=>x.id===id) : null;
+  const cs = a0 ? a0.casal : (S.casal==="tots" ? "c1" : S.casal);
   const ss = D.sales.filter(s=>s.casal===cs);
-  overlay(hdr("Nova activitat", casal(cs).nom)+'<form class="form" id="fa" novalidate>'+
-  '<div class="field full"><label for="a_nom">Nom</label><input id="a_nom" placeholder="Ex.: Pilates suau"></div>'+
-  '<div class="field"><label for="a_eix">Eix</label><select id="a_eix">'+Object.entries(EIXOS).map(e=>'<option value="'+e[0]+'">'+e[1]+'</option>').join("")+'</select></div>'+
-  '<div class="field"><label for="a_dia">Dia</label><select id="a_dia">'+DIES.map((d,i)=>'<option value="'+i+'">'+d+'</option>').join("")+'</select></div>'+
-  '<div class="field"><label for="a_ini">Inici</label><input id="a_ini" type="time" value="10:00" step="900"></div>'+
-  '<div class="field"><label for="a_fi">Fi</label><input id="a_fi" type="time" value="11:00" step="900"></div>'+
-  '<div class="field"><label for="a_sala">Sala</label><select id="a_sala">'+ss.map(s=>'<option value="'+s.id+'">'+esc(s.nom)+' ('+s.aforament+')</option>').join("")+'</select></div>'+
-  '<div class="field"><label for="a_pl">Places</label><input id="a_pl" type="number" min="1" value="15"></div>'+
-  '<div class="field"><label for="a_prof">Qui la fa</label><input id="a_prof" placeholder="Monitor/a o voluntariat"></div>'+
-  '<div class="field"><label for="a_preu">Preu (€ / mes)</label><input id="a_preu" type="number" min="0" value="0"></div>'+
-  '<div class="full alert" id="aerr" hidden></div><div class="m-f full"><button type="button" class="btn ghost" data-close>Cancel·lar</button><button class="btn primary" type="submit">Crear activitat</button></div></form>');
-  $("#fa").onsubmit=e=>{ e.preventDefault(); const v=k=>$("#a_"+k).value.trim(); const er=$("#aerr");
+  const x = a0 || {nom:"",eix:Object.keys(EIXOS)[0],dia:0,inici:"10:00",fi:"11:00",sala:ss[0]&&ss[0].id,places:15,prof:"",preu:0,resp:[]};
+  const tipus0 = a0 ? (esPunt(a0)?"punt":"set") : (S.actTipus||"set");
+  const resps = (S._usuaris||[]).filter(t=>t.actiu&&(t.rol==="tallerista"||t.rol==="voluntari")&&(t.casal===cs||t.casal==="tots"));
+  overlay(hdr(id?"Editar activitat":"Nova activitat", casal(cs).nom)+'<form class="form" id="fa" novalidate>'+
+  '<div class="field full"><label>Tipus</label><div class="filters" role="group" aria-label="Tipus d\'activitat" style="margin:0">'+(a0?'':'<button type="button" data-atip="set" aria-pressed="'+(tipus0==="set")+'">Setmanal</button><button type="button" data-atip="punt" aria-pressed="'+(tipus0==="punt")+'">Puntual (un sol dia)</button>')+(a0?'<span class="chip">'+(tipus0==="punt"?"Puntual":"Setmanal")+'</span>':'')+'</div></div>'+
+  '<div class="field full"><label for="a_nom">Nom</label><input id="a_nom" value="'+esc(x.nom)+'" placeholder="'+(tipus0==="punt"?"Ex.: Xerrada sobre seguretat a casa":"Ex.: Pilates suau")+'"></div>'+
+  '<div class="field"><label for="a_eix">Eix</label><select id="a_eix">'+Object.entries(EIXOS).map(e=>'<option value="'+e[0]+'"'+(x.eix===e[0]?' selected':'')+'>'+e[1]+'</option>').join("")+'</select></div>'+
+  (tipus0==="punt"
+    ? '<div class="field"><label for="a_data">Data</label><input id="a_data" type="date" min="'+isoAvui()+'" value="'+esc(x.data||addDays(isoAvui(),7))+'"></div>'
+    : '<div class="field"><label for="a_dia">Dia</label><select id="a_dia">'+DIES.map((d,i)=>'<option value="'+i+'"'+(x.dia===i?' selected':'')+'>'+d+'</option>').join("")+'</select></div>')+
+  '<div class="field"><label for="a_ini">Inici</label><input id="a_ini" type="time" value="'+esc(x.inici)+'" step="900"></div>'+
+  '<div class="field"><label for="a_fi">Fi</label><input id="a_fi" type="time" value="'+esc(x.fi)+'" step="900"></div>'+
+  '<div class="field"><label for="a_sala">Sala</label><select id="a_sala">'+ss.map(s=>'<option value="'+s.id+'"'+(x.sala===s.id?' selected':'')+'>'+esc(s.nom)+' ('+s.aforament+')</option>').join("")+'</select></div>'+
+  '<div class="field"><label for="a_pl">Places</label><input id="a_pl" type="number" min="1" value="'+x.places+'"></div>'+
+  '<div class="field"><label for="a_prof">Qui la fa</label><input id="a_prof" value="'+esc(x.prof==="Per assignar"?"":x.prof)+'" placeholder="Monitor/a, entitat o voluntariat"></div>'+
+  '<div class="field"><label for="a_preu">Preu (€'+(tipus0==="punt"?'':' / mes')+')</label><input id="a_preu" type="number" min="0" step="0.5" value="'+(x.preu||0)+'"></div>'+
+  '<div class="field full"><label>Talleristes i voluntariat que passen llista</label>'+(resps.length?'<div style="display:flex;flex-wrap:wrap;gap:10px">'+resps.map(t=>'<label class="check"><input type="checkbox" data-resp="'+t.id+'"'+((x.resp||[]).includes(t.id)?' checked':'')+'>'+esc(nomT(t))+' · '+esc(ROLS[t.rol])+'</label>').join("")+'</div>':'<p class="note" style="margin:0">No hi ha talleristes ni voluntariat donats d\'alta en aquest casal. La Supervisió els dona d\'alta a Equip.</p>')+'</div>'+
+  '<div class="full alert" id="aerr" hidden></div><div class="m-f full"><button type="button" class="btn ghost" data-close>Cancel·lar</button><button class="btn primary" type="submit">'+(id?'Desar canvis':'Crear activitat')+'</button></div></form>');
+  document.querySelectorAll("[data-atip]").forEach(b=>b.onclick=()=>{ S.actTipus=b.dataset.atip; formAct(); });
+  const desar=(anulAct, data)=>{ const v=k=>$("#a_"+k).value.trim(); const sl=sala(v("sala"));
+    const resp=[...document.querySelectorAll("[data-resp]")].filter(c=>c.checked).map(c=>c.dataset.resp);
+    const o={nom:v("nom"),eix:v("eix"),inici:v("ini"),fi:v("fi"),sala:sl.id,places:Number(v("pl")),preu:Number(v("preu"))||0,prof:v("prof")||"Per assignar",resp};
+    if(tipus0==="punt"){ o.data=data; o.dia=wd(data); } else o.dia=Number(v("dia"));
+    if(anulAct){ anulAct.anul=anulAct.anul||[]; anulAct.anul.push({d:data,m:"Coincideix amb l'activitat puntual «"+o.nom+"»"}); logCanvi("Sessió anul·lada",anulAct.nom+" · "+fdata(data),"Coincideix amb l'activitat puntual «"+o.nom+"»"); }
+    if(a0){ Object.assign(a0,o); logCanvi("Canvi d'activitat",o.nom+" · "+casal(cs).curt); }
+    else { D.activitats.push(Object.assign({id:uid("a"),casal:cs,inscrits:[],espera:[],anul:[]},o)); logCanvi(tipus0==="punt"?"Nova activitat puntual":"Nova activitat",o.nom+" · "+(tipus0==="punt"?fdata(data):DIES[o.dia])+" · "+casal(cs).curt); }
+    save(); closeOverlay(); toast(anulAct?"Activitat creada. La sessió de «"+anulAct.nom+"» del "+fdata(data)+" queda anul·lada; les altres setmanes no canvien.":(id?"Canvis desats.":"Activitat creada.")); render(); };
+  $("#fa").onsubmit=e=>{ e.preventDefault(); const v=k=>$("#a_"+k).value.trim(); const er=$("#aerr"); er.hidden=true;
     const sl=sala(v("sala")), pl=Number(v("pl"));
-    if(!v("nom")){ er.textContent="Posa un nom a l'activitat."; er.hidden=false; return; }
-    if(mins(v("fi"))<=mins(v("ini"))){ er.textContent="L'hora de fi ha de ser posterior a la d'inici."; er.hidden=false; return; }
-    if(pl>sl.aforament){ er.textContent="La "+sl.nom+" té aforament per a "+sl.aforament+" persones."; er.hidden=false; return; }
-    const c=conflicte(sl.id,Number(v("dia")),v("ini"),v("fi")); if(c){ er.textContent="La sala està ocupada. "+c; er.hidden=false; return; }
-    D.activitats.push({id:uid("a"),casal:cs,nom:v("nom"),eix:v("eix"),dia:Number(v("dia")),inici:v("ini"),fi:v("fi"),sala:sl.id,places:pl,preu:Number(v("preu"))||0,prof:v("prof")||"Per assignar",inscrits:[],espera:[]});
-    save(); closeOverlay(); toast("Activitat creada."); render(); };
+    const err=t=>{ er.innerHTML=esc(t); er.hidden=false; };
+    if(!v("nom")) return err("Posa un nom a l'activitat.");
+    if(mins(v("fi"))<=mins(v("ini"))) return err("L'hora de fi ha de ser posterior a la d'inici.");
+    if(!(pl>=1)) return err("Indica el nombre de places.");
+    if(pl>sl.aforament) return err("La "+sl.nom+" té aforament per a "+sl.aforament+" persones.");
+    if(a0 && pl<a0.inscrits.length) return err("Ja hi ha "+a0.inscrits.length+" persones inscrites. No es poden posar menys places.");
+    if(tipus0==="punt"){ const d=v("data"); if(!d) return err("Tria la data.");
+      if(!a0 && d<isoAvui()) return err("La data ja ha passat.");
+      const c=conflicteData(sl.id,d,v("ini"),v("fi"),id);
+      if(c && c.tipus==="periodica"){ er.innerHTML='<b>'+esc(c.txt)+'</b><br>Pots anul·lar només la sessió del '+esc(DIES7[wd(d)].toLowerCase()+" "+fdata(d))+' de «'+esc(c.act.nom)+'». Les altres setmanes es farà igual. Recorda avisar les persones inscrites.<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn sm danger" id="aAnul">Anul·lar aquella sessió i crear</button></div>'; er.hidden=false;
+        $("#aAnul").onclick=()=>desar(c.act,d); return; }
+      if(c) return err("La sala està ocupada aquell dia. "+c.txt);
+      return desar(null,d); }
+    const c=conflicte(sl.id,Number(v("dia")),v("ini"),v("fi"),id); if(c) return err("La sala està ocupada. "+c);
+    const dia=Number(v("dia")), a1=mins(v("fi")), b0=v("ini");
+    const pf=D.activitats.find(a=>a.id!==id&&esPunt(a)&&a.data>=isoAvui()&&a.sala===sl.id&&wd(a.data)===dia&&mins(a.inici)<a1&&mins(b0)<mins(a.fi));
+    if(pf) return err("El "+fdata(pf.data)+" hi ha l'activitat puntual «"+pf.nom+"» a la mateixa sala i hora. Canvia l'horari o la sala, o anul·la aquella sessió després de crear l'activitat.");
+    desar(null,null); };
 }
 
 VIEWS.sales = () => {
   const ss=D.sales.filter(inCasal); if(!S.sala||!ss.find(s=>s.id===S.sala)) S.sala=ss[0].id;
   const sl=sala(S.sala); const H0=9, H1=21, PX=48;
   const top=t=>(mins(t)-H0*60)/60*PX;
-  const cols=DIES.map((d,di)=>{
-    const evs=D.activitats.filter(a=>a.sala===sl.id&&a.dia===di).map(a=>'<div class="ev" style="top:'+top(a.inici)+'px;height:'+(top(a.fi)-top(a.inici)-2)+'px;color:var(--'+a.eix+')"><b>'+esc(a.nom)+'</b><span class="num">'+a.inici+'–'+a.fi+'</span></div>').join("");
+  const dl=addDays(isoAvui(),-avuiIdx7());
+  const cols=DIES.map((d,di)=>{ const dt=addDays(dl,di);
+    const evs=D.activitats.filter(a=>a.sala===sl.id&&(esPunt(a)?a.data===dt:a.dia===di)).map(a=>{ const an=!esPunt(a)&&anulada(a,dt); return '<div class="ev" style="top:'+top(a.inici)+'px;height:'+(top(a.fi)-top(a.inici)-2)+'px;color:var(--'+a.eix+')'+(an?';opacity:.45;text-decoration:line-through':'')+'"><b>'+(esPunt(a)?'★ ':'')+esc(a.nom)+'</b><span class="num">'+a.inici+'–'+a.fi+(an?' · no es fa':'')+'</span></div>'; }).join("");
     const rs=D.reserves.filter(r=>r.sala===sl.id&&r.dia===di).map(r=>'<div class="ev res" style="top:'+top(r.inici)+'px;height:'+(top(r.fi)-top(r.inici)-2)+'px"><b>'+esc(r.entitat)+'</b><span>'+esc(r.motiu)+' · '+r.inici+'–'+r.fi+'</span></div>').join("");
     return '<div class="col" style="height:'+((H1-H0)*PX)+'px">'+evs+rs+'</div>';
   }).join("");
@@ -1027,7 +1115,8 @@ VIEWS.sales = () => {
   return '<div class="head"><div><h1>Sales i espais</h1><p>Ocupació setmanal i reserves d\'entitats.</p></div><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" id="gestSales">Gestionar espais</button><button class="btn primary" id="novaRes">'+ICON.plus+'Nova reserva</button></div></div>'+
   '<div class="filters" role="group" aria-label="Sala">'+ss.map(s=>'<button data-sala="'+s.id+'" aria-pressed="'+(S.sala===s.id)+'">'+esc(s.nom)+(S.casal==="tots"?' · '+esc(casal(s.casal).curt):'')+'</button>').join("")+'</div>'+
   '<div class="legend">'+Object.keys(EIX_C).map(e=>'<span><i style="background:var(--'+e+')"></i>'+EIX_C[e]+'</span>').join("")+'<span><i style="background:repeating-linear-gradient(135deg,var(--muted) 0 2px,transparent 2px 4px)"></i>Reserva externa</span><span>Aforament: '+sl.aforament+' persones</span></div>'+
-  '<div class="tablewrap"><div class="cal"><div class="dh"></div>'+DIES.map((d,i)=>'<div class="dh'+(esAvuiLaborable()&&i===avuiIdx()?' today':'')+'">'+d+'</div>').join("")+
+  '<p class="note" style="margin:0">Setmana del '+fdata(addDays(isoAvui(),-avuiIdx7()))+'. ★ activitat puntual · ratllat: sessió anul·lada.</p>'+
+  '<div class="tablewrap"><div class="cal"><div class="dh"></div>'+DIES.map((d,i)=>'<div class="dh'+(esAvuiLaborable()&&i===avuiIdx()?' today':'')+'">'+d+' '+fdata(addDays(addDays(isoAvui(),-avuiIdx7()),i))+'</div>').join("")+
   '<div class="hours">'+Array.from({length:H1-H0},(_,i)=>'<div class="num">'+(H0+i)+':00</div>').join("")+'</div>'+cols+'</div></div>'+
   '<section class="panel"><div class="panel-h"><h2>Reserves d\'entitats</h2></div><div class="list">'+(reservesLlista.map(r=>'<div class="row"><div class="t"><b>'+esc(r.entitat)+'</b><span>'+esc(r.motiu)+' · '+esc(sala(r.sala).nom)+' · '+DIES[r.dia]+' '+r.inici+'–'+r.fi+'</span></div><button class="btn sm ghost danger" data-delres="'+r.id+'">Anul·lar</button></div>').join("")||'<div class="empty">Cap reserva.</div>')+'</div></section>';
 };
@@ -1090,10 +1179,22 @@ VIEWS.config = () => {
   const L={C:"Consulta",E:"Enregistra",M:"Modifica",B:"Esborra"};
   const cell=v=> v ? '<span class="perms">'+"CEMB".split("").map(a=>'<i class="'+(v.includes(a)?'on':'')+'" title="'+L[a]+'">'+a+'</i>').join("")+'</span>' : '<span class="no">—</span>';
   const grups=[...new Set(PERMS.map(r=>r.g))];
-  return '<div class="head"><div><h1>Rols i permisos</h1><p>Què pot fer cada perfil i com ho veu cadascú.</p></div></div>'+
+  const admin=false; // L'edició de permisos encara no està connectada als permisos del servidor (taula permisos).
+  const ed=admin&&S.permEd;
+  const val=(r,k)=> ed&&S.permEd[r.m]&&S.permEd[r.m][k]!==undefined ? S.permEd[r.m][k] : (r.p[k]||"");
+  const cellE=(r,k)=>{ const v=val(r,k), lock=PERM_LOCK(r.m,k), canv=v!==permDef(r.m,k);
+    if(!ed) return v||canv ? '<span class="perms'+(canv?' canviat':'')+'" title="'+(canv?'Canviat respecte dels valors per defecte':'')+'">'+"CEMB".split("").map(a=>'<i class="'+(v.includes(a)?'on':'')+'" title="'+L[a]+'">'+a+'</i>').join("")+'</span>' : '<span class="no">—</span>';
+    if(lock) return '<span class="perms lock" title="No es pot canviar">'+"CEMB".split("").map(a=>'<i class="'+(v.includes(a)?'on':'')+'">'+a+'</i>').join("")+'</span>';
+    return '<span class="perms'+(canv?' canviat':'')+'">'+"CEMB".split("").map(a=>'<button type="button" class="pb'+(v.includes(a)?' on':'')+'" data-pc="'+r.m+'|'+k+'|'+a+'" aria-pressed="'+v.includes(a)+'" aria-label="'+esc(ROLS[k]+' · '+r.n+' · '+L[a])+'">'+a+'</button>').join("")+'</span>'; };
+  const nCanvis=ed?Object.entries(S.permEd).reduce((n,[m,o])=>n+Object.entries(o).filter(([k,v])=>v!==(PM[m].p[k]||"")).length,0):0;
+  const nPers=Object.values((D.config&&D.config.permisos)||{}).reduce((n,o)=>n+Object.keys(o).length,0);
+  return '<div class="head"><div><h1>Rols i permisos</h1><p>Què pot fer cada perfil i com ho veu cadascú.</p></div>'+(admin&&!ed?'<button class="btn primary" id="permEd">Editar permisos</button>':'')+'</div>'+
+  (ed?'<section class="panel" style="border:2px solid var(--accent)"><div class="panel-h"><div><h2>Editant permisos</h2><p style="margin:2px 0 0;color:var(--muted);font-size:14px">Toca una lletra per activar-la o desactivar-la. Sense <b>C</b> (consulta) no hi ha cap altre permís. Les caselles amb contorn groc són diferents dels valors per defecte. La columna de Supervisió i la fila d\'Equip no es poden canviar.</p></div></div>'+
+    '<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn primary" id="permSave"'+(nCanvis?'':' disabled')+'>Desar '+nCanvis+' canvi'+(nCanvis===1?'':'s')+'</button><button class="btn ghost" id="permCancel">Descartar</button>'+(nPers?'<button class="btn ghost danger" id="permReset" style="margin-left:auto">Tornar als valors per defecte</button>':'')+'</div></section>':'')+
+  (admin&&!ed&&nPers?'<div class="note">Hi ha '+nPers+' permisos canviats respecte dels valors per defecte (amb contorn groc).</div>':'')+
     '<div class="legend"><span><span class="perms"><i class="on">C</i></span>Consulta</span><span><span class="perms"><i class="on">E</i></span>Enregistra</span><span><span class="perms"><i class="on">M</i></span>Modifica</span><span><span class="perms"><i class="on">B</i></span>Esborra (amb motiu)</span></div>'+
   '<div class="tablewrap"><table class="perm"><thead><tr><th>Àmbit</th>'+ROLK.map(k=>'<th>'+ROLS[k]+'</th>').join("")+'</tr><tr><td style="font-size:12px;color:var(--muted)">Abast</td>'+ROLK.map(k=>'<td style="font-size:12px;color:var(--muted);white-space:normal">'+ABAST[k]+'</td>').join("")+'</tr></thead><tbody>'+
-  grups.map(g=>'<tr><td colspan="'+(ROLK.length+1)+'" class="grp">'+g+'</td></tr>'+PERMS.filter(r=>r.g===g).map(r=>'<tr><td style="white-space:normal;min-width:220px"><b style="font-weight:600">'+r.n+'</b>'+(r.nota?'<div style="font-size:12px;color:var(--muted)">'+r.nota+'</div>':'')+'</td>'+ROLK.map(k=>'<td>'+cell(r.p[k])+'</td>').join("")+'</tr>').join("")).join("")+'</tbody></table></div>'+
+  grups.map(g=>'<tr><td colspan="'+(ROLK.length+1)+'" class="grp">'+g+'</td></tr>'+PERMS.filter(r=>r.g===g).map(r=>'<tr><td style="white-space:normal;min-width:220px"><b style="font-weight:600">'+r.n+'</b>'+(r.nota?'<div style="font-size:12px;color:var(--muted)">'+r.nota+'</div>':'')+'</td>'+ROLK.map(k=>'<td>'+cellE(r,k)+'</td>').join("")+'</tr>').join("")).join("")+'</tbody></table></div>'+
   '<section class="panel"><div class="panel-h"><h2>Normes generals</h2></div><div class="list">'+[
     "Només la Supervisió (Direcció General) dona d'alta i de baixa usuaris del programa i canvia perfils i PIN.",
     "La Coordinació dona d'alta, modifica i dona de baixa la resta: persones, activitats, sales, proveïdors, productes… Només Coordinació i Supervisió poden esborrar, sempre amb confirmació i motiu.",
@@ -1109,6 +1210,21 @@ VIEWS.config = () => {
   '<section class="panel"><div class="panel-h"><h2>Registre de canvis</h2><span class="chip">'+D.registre.length+'</span></div><div class="list">'+(D.registre.slice(0,20).map(r=>'<div class="row"><div class="time num" style="width:96px;font-size:13px">'+fdata(r.data.slice(0,10))+' '+r.data.slice(11)+'</div><div class="t"><b>'+esc(r.accio)+' · '+esc(r.detall)+'</b><span>'+esc(r.rol)+(r.motiu?' · Motiu: '+esc(r.motiu):'')+'</span></div></div>').join("")||'<div class="empty">Encara no hi ha cap canvi registrat. Hi surten esborrats, baixes, tancaments i reobertures.</div>')+'</div></section>';
 };
 BIND.config = () => {
+  const pe=$("#permEd"); if(pe) pe.onclick=()=>{ S.permEd={}; render(); };
+  const pcn=$("#permCancel"); if(pcn) pcn.onclick=()=>{ S.permEd=null; render(); toast("Canvis descartats."); };
+  document.querySelectorAll("[data-pc]").forEach(b=>b.onclick=()=>{ const [m,k,a]=b.dataset.pc.split("|"); const r=PM[m];
+    const cur=(S.permEd[m]&&S.permEd[m][k]!==undefined)?S.permEd[m][k]:(r.p[k]||""); let set=new Set(cur.split(""));
+    if(set.has(a)){ set.delete(a); if(a==="C") set=new Set(); } else { set.add(a); set.add("C"); }
+    (S.permEd[m]=S.permEd[m]||{})[k]="CEMB".split("").filter(x=>set.has(x)).join(""); const y=window.scrollY; render(); window.scrollTo(0,y); });
+  const ps=$("#permSave"); if(ps) ps.onclick=()=>{ const canvis=[];
+    Object.entries(S.permEd).forEach(([m,o])=>Object.entries(o).forEach(([k,v])=>{ if(v!==(PM[m].p[k]||"")) canvis.push([m,k,v]); }));
+    if(!canvis.length) return;
+    confirmMotiu("Desar els canvis de permisos", canvis.length+" canvis. S'apliquen de seguida a tothom que tingui aquest perfil.", "Desar", m=>{
+      D.config.permisos=D.config.permisos||{};
+      canvis.forEach(([mm,k,v])=>{ const o=D.config.permisos[mm]=D.config.permisos[mm]||{}; if(v===permDef(mm,k)) delete o[k]; else o[k]=v; if(!Object.keys(o).length) delete D.config.permisos[mm]; });
+      logCanvi("Canvi de permisos", canvis.map(([mm,k,v])=>ROLS[k]+" · "+PM[mm].n+": "+(v||"cap")).join(" | "), m);
+      aplicaPermisos(); S.permEd=null; save(); render(); toast("Permisos desats."); }); };
+  const pr=$("#permReset"); if(pr) pr.onclick=()=>confirmMotiu("Tornar als valors per defecte","Es desfan tots els canvis de permisos.","Restaurar",m=>{ D.config.permisos={}; logCanvi("Permisos restaurats als valors per defecte","",m); aplicaPermisos(); S.permEd=null; save(); render(); toast("Permisos restaurats."); });
 };
 
 /* ---------- Comandes a proveïdors ---------- */
@@ -1420,8 +1536,8 @@ async function pdfComanda(c){
     catch(e){ if(e&&e.code==="declined") return; if(e&&e.code==="rate_limited"){ toast("Ja hi ha una descàrrega pendent."); return; } } }
   try{ doc.save(nom); toast("PDF de la comanda "+c.num+" descarregat."); }catch(e){ toast("No s'ha pogut descarregar el PDF."); }
 }
-/* ---------- Petitoris de comanda (bar-cafeteria i neteja) ---------- */
-const PET_INFO={bar:{t:"Bar-cafeteria",d:"Aigües, cafè i infusions, refrescos, llet, cerveses, sucre, snacks, licors, brioixeria i sucs.",ic:"cup"},net:{t:"Neteja",d:"Productes i estris de neteja, paper, bosses, guants i gots.",ic:"tool"}};
+/* ---------- Petitoris de comanda (bar-cafeteria, neteja, farmaciola i material de tallers) ---------- */
+const PET_INFO={bar:{t:"Bar-cafeteria",d:"Aigües, cafè i infusions, refrescos, llet, cerveses, sucre, snacks, licors, brioixeria i sucs.",ic:"cup"},net:{t:"Neteja",d:"Productes i estris de neteja, paper, bosses, guants i gots.",ic:"tool"},far:{t:"Farmaciola",d:"Material de primeres cures: tiretes, gasses, antisèptic i gel hidroalcohòlic.",ic:"heart"},tal:{t:"Material de tallers",d:"Material per a manualitats i tallers: cartolines, cola, llapis, llana, tisores i pintura.",ic:"act"}};
 const petProds = (k,prov) => D.compres.productes.filter(p=>p.pet===k&&(!prov||p.prov===prov));
 const petProvs = k => { const o=(D.compres.petitoris&&D.compres.petitoris[k]&&D.compres.petitoris[k].provs)||[]; const extra=[...new Set(petProds(k).map(p=>p.prov))].filter(x=>!o.includes(x)); return o.concat(extra).filter(id=>petProds(k,id).some(p=>p.actiu)); };
 function nouPetitori(k){ if(!catsPermeses().includes(PET_CAT[k])){ toast("El teu perfil no pot fer aquesta comanda."); return; } const u=ME; S.petF={k,casal:S.casal==="tots"?"":S.casal,data:isoAvui(),nom:u?nomT(u):"",q:{},com:{}}; S.cTab="pet"; render(); window.scrollTo(0,0); }

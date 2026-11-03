@@ -188,6 +188,11 @@ tbody tr.click{cursor:pointer} tbody tr.click:hover{background:var(--surface)}
 [hidden]{display:none!important}
 .perms{display:inline-flex;gap:3px}.perms i{font-style:normal;width:20px;height:20px;border-radius:5px;display:grid;place-items:center;font-size:11px;font-weight:700;background:var(--surface2);color:var(--muted);opacity:.45}
 .perms i.on{background:var(--accent-soft);color:var(--accent);opacity:1}
+.perms .pb{font:inherit;font-size:12px;font-weight:800;width:26px;height:26px;border-radius:6px;border:1.5px dashed var(--line,#D8CFF3);background:var(--surface);color:var(--muted);cursor:pointer;display:grid;place-items:center;padding:0}
+.perms .pb.on{background:var(--accent);border:1.5px solid var(--accent);color:#fff}
+.perms .pb:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.perms.canviat{outline:2px solid #F2B544;outline-offset:3px;border-radius:7px}
+.perms.lock i{opacity:.8}
 td.grp{background:var(--surface);font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600;padding:8px 16px}
 .perm td:not(:first-child){text-align:center}
 .steps{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:8px}
