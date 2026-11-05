@@ -620,7 +620,7 @@ function pantallaTauleta(){
     '<p class="kq-khint">Kelio s\'obre en una pestanya nova. Quan acabis, tanca-la i tornaràs a aquesta pantalla.</p></div>'+
     '<div class="kq-pad"><p>Entrar al programa</p><span class="kq-hint">Escriu el teu PIN de 4 xifres</span><div class="kq-dots">'+[0,1,2,3].map(i=>'<i class="'+(i<KS.pin.length?"on":"")+'"></i>').join("")+'</div><div class="kq-err">'+esc(KS.err)+'</div>'+
     '<div class="kq-keys">'+["1","2","3","4","5","6","7","8","9","del","0","ok"].map(k=>'<button data-kk="'+k+'" aria-label="'+(k==="del"?"Esborrar":k==="ok"?"Acceptar":k)+'"'+(KS.ocupat?' disabled':'')+'>'+(k==="del"?"⌫":k==="ok"?ICON.check:k)+'</button>').join("")+'</div>'+
-    '<button class="btn ghost sm" id="kqMail" style="margin-top:12px">Entrar amb correu i contrasenya</button></div></div>'+
+    '<button class="btn ghost sm" id="kqNou" style="margin-top:12px">Sóc nou/nova al casal: demanar accés</button><button class="btn ghost sm" id="kqMail" style="margin-top:6px">Entrar amb correu i contrasenya</button></div></div>'+
     '<p class="kq-legal">El PIN és personal. No el diguis a ningú. · Coordinació i Direcció entren amb correu, contrasenya i doble factor. · <button class="lnk" id="kqOff">Desconnectar la tauleta</button></p></div>';
   clearInterval(KS.clock); KS.clock=setInterval(()=>{ const c=$("#kqClock"); if(c) c.textContent=horaAra(); else clearInterval(KS.clock); },1000);
   const press=async k=>{ if(KS.ocupat) return; KS.err="";
@@ -637,9 +637,28 @@ function pantallaTauleta(){
     pantallaTauleta(); };
   document.querySelectorAll("[data-kk]").forEach(b=>b.onclick=()=>press(b.dataset.kk));
   document.onkeydown=e=>{ if(!ME||ME.rol!=="tauleta") return; if(/^[0-9]$/.test(e.key)) press(e.key); else if(e.key==="Backspace") press("del"); else if(e.key==="Enter") press("ok"); };
+  $("#kqNou").onclick=()=>formSollicitud(x=>fn("usuaris",{accio:"sollicitar",...x}));
   $("#kqMail").onclick=async()=>{ await guardarTauleta(); deixarEscoltar(); await sb.auth.signOut({scope:"local"}); ME=null; pantallaAcces("entrar"); };
   $("#kqOff").onclick=()=>{ overlay(hdr("Desconnectar la tauleta")+'<p style="margin:0">La tauleta deixarà d\'estar configurada i caldrà la contrasenya del compte de la tauleta per tornar-la a connectar.</p><div class="m-f"><button class="btn ghost" data-close>Cancel·lar</button><button class="btn danger" id="okOff">Desconnectar</button></div>');
     $("#okOff").onclick=async()=>{ try{ localStorage.removeItem("casals-tauleta"); }catch(e){} await sb.auth.signOut({scope:"local"}); ME=null; pantallaAcces("entrar","Tauleta desconnectada."); }; };
+}
+
+/* ---------- Accés sense correu: sol·licitud des de la tauleta ----------
+   Per al personal que no té correu corporatiu (neteja, monitors, talleristes, voluntariat…). La persona omple el formulari a la
+   tauleta; la Supervisió la valida a Equip, li tria el perfil i li posa un PIN. Només podrà entrar amb el PIN a la tauleta. */
+const POSICIONS=[["neteja","Neteja"],["tallerista","Monitor/a o tallerista"],["voluntari","Voluntari/ària"],["dinamitzador","Animació"],["informador","Informació"],["altres","Altres"]];
+function formSollicitud(enviar){
+  overlay(hdr("Demanar accés al programa","Per a qui no té correu de la Fundació")+'<form class="form" id="fsl" novalidate>'+
+    '<div class="field"><label for="sl_n">Nom</label><input id="sl_n" autocomplete="off" maxlength="60"></div><div class="field"><label for="sl_c">Cognoms</label><input id="sl_c" autocomplete="off" maxlength="80"></div>'+
+    '<div class="field full"><label for="sl_p">Quina feina fas al casal?</label><select id="sl_p">'+POSICIONS.map(p=>'<option value="'+p[0]+'">'+p[1]+'</option>').join("")+'</select></div>'+
+    '<p class="note full" style="margin:0">La Direcció General revisarà la sol·licitud i et donarà <b>en persona</b> el teu PIN de 4 xifres. Només el faràs servir en aquesta tauleta.</p>'+
+    '<div class="full alert" id="slerr" hidden></div><div class="m-f full"><button type="button" class="btn ghost" data-close>Cancel·lar</button><button class="btn primary" type="submit">Enviar la sol·licitud</button></div></form>');
+  $("#fsl").onsubmit=async e=>{ e.preventDefault(); const er=$("#slerr"), b=e.target.querySelector("[type=submit]");
+    const x={nom:$("#sl_n").value.trim(),cognoms:$("#sl_c").value.trim(),posicio:$("#sl_p").value};
+    if(x.nom.length<2||x.cognoms.length<2){ er.textContent="Escriu el nom i els cognoms."; er.hidden=false; return; }
+    b.disabled=true;
+    try{ await enviar(x); overlay(hdr("Sol·licitud enviada")+'<p style="margin:0">Gràcies, '+esc(x.nom)+'. La Direcció General et donarà el PIN en persona. Fins aleshores no podràs entrar al programa.</p><div class="m-f"><button class="btn primary" data-close>D\'acord</button></div>'); }
+    catch(err){ er.textContent=err.message||"No s'ha pogut enviar."; er.hidden=false; b.disabled=false; } };
 }
 
 async function sortir(){
@@ -697,20 +716,23 @@ const esResp = () => S.rol==="tallerista"||S.rol==="voluntari";
 const ROLS_ALTA=[["supervisio","Supervisió (Direcció General)"],["direccio","Coordinació"],["dinamitzador","Animació sociocultural"],["informador","Informador/a"],["neteja","Neteja"],["tallerista","Tallerista (passa llista de les seves activitats)"],["voluntari","Voluntari/ària (passa llista de les seves activitats)"],["ajuntament","Ajuntament (només informes)"],["pendent","Sense accés"]];
 async function carregarUsuaris(){
   try{
-    if(esSup()){ const r=await fn("usuaris",{accio:"llistar"}); S._usuaris=r.usuaris; }
+    if(esSup()){ const r=await fn("usuaris",{accio:"llistar"}); S._usuaris=r.usuaris;
+      try{ const q=await fn("usuaris",{accio:"sollicituds"}); const ant=(S._sol||[]).length; S._sol=q.sollicituds||[]; if(S._sol.length && !ant && S.view!=="equip") toast("Tens "+S._sol.length+" sol·licitud"+(S._sol.length>1?"s":"")+" d'accés pendent"+(S._sol.length>1?"s":"")+" a Equip."); }catch(e){ S._sol=S._sol||[]; } }
     else { const {data,error}=await sb.from("perfils").select("id,email,nom,rol,casal,actiu,creat").order("creat"); if(error) throw error; S._usuaris=data||[]; }
   }catch(e){ S._usuaris=S._usuaris||[]; toast("No s'han pogut carregar els usuaris: "+textError(e)); }
   if(S.view==="equip"||S.view==="inici") render();
 }
 VIEWS.equip = () => {
   const us=S._usuaris;
-  const fila=t=>'<div class="row" style="flex-wrap:wrap"><span class="avatar">'+esc(((t.nom||t.email||"?").split(/\s+/).map(x=>x[0]).join("").slice(0,2)).toUpperCase())+'</span><div class="t" style="min-width:240px"><b>'+esc(nomT(t))+(t.actiu?'':' · desactivat')+(ME&&t.id===ME.id?' <span class="chip">Tu</span>':'')+'</b><span>'+esc(t.email||"")+' · '+esc(casalT(t))+' · Perfil: '+esc(ROLS[t.rol]||(t.rol==="tauleta"?"Tauleta del casal":t.rol==="pendent"?"Sense accés":t.rol))+'</span></div>'+
+  const fila=t=>'<div class="row" style="flex-wrap:wrap"><span class="avatar">'+esc(((t.nom||t.email||"?").split(/\s+/).map(x=>x[0]).join("").slice(0,2)).toUpperCase())+'</span><div class="t" style="min-width:240px"><b>'+esc(nomT(t))+(t.actiu?'':' · desactivat')+(ME&&t.id===ME.id?' <span class="chip">Tu</span>':'')+'</b><span>'+esc(t.sense_correu?"Sense correu · entra amb PIN a la tauleta":(t.email||""))+' · '+esc(casalT(t))+' · Perfil: '+esc(ROLS[t.rol]||(t.rol==="tauleta"?"Tauleta del casal":t.rol==="pendent"?"Sense accés":t.rol))+'</span></div>'+
     (esSup()&&ROLS_PIN.includes(t.rol)?'<span class="chip '+(t.pin?'good':'warn')+'">'+(t.pin?'Té PIN':'Sense PIN')+'</span>':'')+
-    (esSup()?'<button class="btn sm" data-eus="'+t.id+'">Editar</button>'+(ROLS_PIN.includes(t.rol)&&t.actiu?'<button class="btn sm" data-pus="'+t.id+'">PIN</button>':'')+(t.rol!=="tauleta"?'<button class="btn sm ghost" data-rus="'+t.id+'">Enllaç de contrasenya</button>':''):'')+'</div>';
+    (esSup()?'<button class="btn sm" data-eus="'+t.id+'">Editar</button>'+(ROLS_PIN.includes(t.rol)&&t.actiu?'<button class="btn sm" data-pus="'+t.id+'">PIN</button>':'')+(t.rol!=="tauleta"&&!t.sense_correu?'<button class="btn sm ghost" data-rus="'+t.id+'">Enllaç de contrasenya</button>':''):'')+'</div>';
   const persones=(us||[]).filter(t=>t.rol!=="tauleta"), tauletes=(us||[]).filter(t=>t.rol==="tauleta");
   return '<div class="head"><div><h1>Equip i accessos</h1><p>'+(us?persones.filter(t=>t.actiu).length+' persones amb accés':'Carregant…')+'</p></div></div>'+
     '<section class="panel"><div class="panel-h"><div><h2>Fitxatges, vacances i permisos</h2><p style="margin:2px 0 0;color:var(--muted);font-size:14px">Es gestionen a Kelio, el programa de RR.HH. de la Fundació. S\'obre en una pestanya nova.</p></div><a class="btn kelio-b" href="'+KELIO+'" target="_blank" rel="noopener noreferrer" data-kelio>'+ICON.clock+'Obrir Kelio</a></div></section>'+
-    '<section class="panel"><div class="panel-h"><h2>Persones amb accés al programa</h2>'+(esSup()?'<button class="btn sm primary" id="nouUs">'+ICON.plus+'Nova persona</button>':'')+'</div>'+
+    (esSup()&&(S._sol||[]).length?'<section class="panel" style="border:2px solid var(--accent)"><div class="panel-h"><div><h2>Sol·licituds d\'accés des de les tauletes</h2><p style="margin:2px 0 0;color:var(--muted);font-size:14px">Persones sense correu de la Fundació. En validar-les, tries el perfil i el PIN. Només podran entrar amb PIN a la tauleta.</p></div></div><div class="list">'+
+      S._sol.map(x=>'<div class="row" style="flex-wrap:wrap"><div class="t" style="min-width:220px"><b>'+esc(x.nom+" "+x.cognoms)+'</b><span>'+esc((POSICIONS.find(p=>p[0]===x.posicio)||["",x.posicio])[1])+' · '+esc(casalT({casal:x.casal}))+' · '+fdata(String(x.creat).slice(0,10))+'</span></div><button class="btn sm primary" data-slok="'+x.id+'">Validar i posar PIN</button><button class="btn sm ghost danger" data-slno="'+x.id+'">Rebutjar</button></div>').join("")+'</div></section>':'')+
+    '<section class="panel"><div class="panel-h"><h2>Persones amb accés al programa</h2>'+(esSup()?'<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" id="nouSC">'+ICON.plus+'Persona sense correu</button><button class="btn sm primary" id="nouUs">'+ICON.plus+'Nova persona</button></div>':'')+'</div>'+
     (esSup()?'':'<p class="note" style="margin:0">Només la Direcció General (Supervisió) dona d\'alta i de baixa usuaris i canvia perfils i PIN.</p>')+
     '<div class="list">'+(persones.map(fila).join("")||'<div class="empty">'+(us?'Encara no hi ha ningú.':'Carregant…')+'</div>')+'</div></section>'+
     (esSup()?'<section class="panel"><div class="panel-h"><div><h2>Tauletes dels casals</h2><p style="margin:2px 0 0;color:var(--muted);font-size:14px">Compte del dispositiu de cada casal. Hi entren amb PIN Animació, Informació, Neteja, talleristes i voluntariat.</p></div><button class="btn sm" id="nouTau">'+ICON.plus+'Nova tauleta</button></div><div class="list">'+(tauletes.map(fila).join("")||'<div class="empty">Cap tauleta configurada.</div>')+'</div></section>':'');
@@ -742,6 +764,21 @@ function formUsuari(id){
     }catch(err){ fail(err.message); }
   };
 }
+/* Alta d'una persona sense correu (des d'una sol·licitud de la tauleta o directament). Entra només amb PIN a la tauleta. */
+function formSenseCorreu(sol){
+  const pos=sol?sol.posicio:"neteja", rol0=pos==="altres"?"tallerista":pos;
+  overlay(hdr(sol?"Validar la sol·licitud":"Persona sense correu","Equip")+'<form class="form" id="fsc" novalidate>'+
+    '<div class="field full"><label for="sc_n">Nom i cognoms</label><input id="sc_n" value="'+esc(sol?sol.nom+" "+sol.cognoms:"")+'"></div>'+
+    '<div class="field"><label for="sc_r">Perfil</label><select id="sc_r">'+ROLS_ALTA.filter(o=>ROLS_PIN.includes(o[0])).map(o=>'<option value="'+o[0]+'"'+(rol0===o[0]?' selected':'')+'>'+o[1]+'</option>').join("")+'</select></div>'+
+    '<div class="field"><label for="sc_c">Casal</label><select id="sc_c">'+[["c1","Casal de Ribes"],["c2","Casal de Roquetes"],["tots","Els dos casals"]].map(o=>'<option value="'+o[0]+'"'+((sol?sol.casal:(S.casal==="tots"?"c1":S.casal))===o[0]?' selected':'')+'>'+o[1]+'</option>').join("")+'</select></div>'+
+    '<div class="field full"><label for="sc_p">PIN (4 xifres)</label><input id="sc_p" inputmode="numeric" maxlength="4" autocomplete="off"></div>'+
+    '<p class="note full" style="margin:0">No té correu: només podrà entrar amb aquest PIN a la tauleta del casal. Digues-li el PIN en persona. Es guarda xifrat i no es pot tornar a veure.</p>'+
+    '<div class="full alert" id="scerr" hidden></div><div class="m-f full"><button type="button" class="btn ghost" data-close>Cancel·lar</button><button class="btn primary" type="submit">'+(sol?'Validar i donar d\'alta':'Donar d\'alta')+'</button></div></form>');
+  $("#fsc").onsubmit=async e=>{ e.preventDefault(); const er=$("#scerr"), btn=e.target.querySelector("[type=submit]"); btn.disabled=true;
+    const cos={accio:sol?"validar":"crear_sense_correu",id:sol?sol.id:undefined,nom:$("#sc_n").value.trim(),rol:$("#sc_r").value,casal:$("#sc_c").value,pin:$("#sc_p").value.trim()};
+    try{ await fn("usuaris",cos); closeOverlay(); toast(cos.nom+" ja pot entrar amb el PIN a la tauleta."); carregarUsuaris(); }
+    catch(err){ er.textContent=err.message; er.hidden=false; btn.disabled=false; } };
+}
 function formPin(id){
   const t=treb(id);
   overlay(hdr("PIN de la tauleta",nomT(t))+'<form class="form" id="fpi" novalidate><div class="field full"><label for="pi_p">PIN nou (4 xifres)</label><input id="pi_p" inputmode="numeric" maxlength="4" autocomplete="off"></div>'+
@@ -767,6 +804,9 @@ BIND.equip = () => {
   if(!S._usuaris) carregarUsuaris();
   const nu=$("#nouUs"); if(nu) nu.onclick=()=>formUsuari();
   const nt=$("#nouTau"); if(nt) nt.onclick=()=>formTauleta();
+  const sc=$("#nouSC"); if(sc) sc.onclick=()=>formSenseCorreu(null);
+  document.querySelectorAll("[data-slok]").forEach(b=>b.onclick=()=>formSenseCorreu((S._sol||[]).find(x=>x.id===b.dataset.slok)));
+  document.querySelectorAll("[data-slno]").forEach(b=>b.onclick=()=>{ const x=(S._sol||[]).find(y=>y.id===b.dataset.slno); confirmMotiu("Rebutjar la sol·licitud de "+x.nom,"La persona no tindrà accés al programa.","Rebutjar",async m=>{ try{ await fn("usuaris",{accio:"rebutjar",id:x.id,motiu:m}); toast("Sol·licitud rebutjada."); carregarUsuaris(); }catch(e){ toast(e.message); } }); });
   document.querySelectorAll("[data-eus]").forEach(b=>b.onclick=()=>formUsuari(b.dataset.eus));
   document.querySelectorAll("[data-pus]").forEach(b=>b.onclick=()=>formPin(b.dataset.pus));
   document.querySelectorAll("[data-rus]").forEach(b=>b.onclick=async()=>{ try{ await fn("usuaris",{accio:"reenviar",id:b.dataset.rus}); toast("Enllaç enviat."); }catch(e){ toast(e.message); } });
