@@ -554,14 +554,17 @@ function pantallaPendent(){
   $("#retry").onclick=()=>entrar(); $("#sortir").onclick=sortir;
 }
 
-/* ---- Doble factor (obligatori per a Supervisió i Coordinació) ---- */
+/* ---- Doble factor: obligatori NOMÉS per a Supervisió. La resta entra amb correu i contrasenya;
+   si algú l'ha activat voluntàriament, se li demana el codi igualment. ---- */
 async function comprovarMFA(){
-  if(!esCoordRol(ME.rol)) return true;
+  if(ME.rol==="tauleta") return true;
   const {data:aal}=await sb.auth.mfa.getAuthenticatorAssuranceLevel();
   if(aal && aal.currentLevel==="aal2") return true;
   const {data:f}=await sb.auth.mfa.listFactors();
   const totp=((f&&f.totp)||[]).filter(x=>x.status==="verified");
-  if(totp.length) pantallaCodiMFA(totp[0].id); else pantallaAltaMFA();
+  if(totp.length){ pantallaCodiMFA(totp[0].id); return false; }
+  if(ME.rol!=="supervisio") return true;
+  pantallaAltaMFA();
   return false;
 }
 async function pantallaAltaMFA(){
@@ -621,7 +624,7 @@ function pantallaTauleta(){
     '<div class="kq-pad"><p>Entrar al programa</p><span class="kq-hint">Escriu el teu PIN de 4 xifres</span><div class="kq-dots">'+[0,1,2,3].map(i=>'<i class="'+(i<KS.pin.length?"on":"")+'"></i>').join("")+'</div><div class="kq-err">'+esc(KS.err)+'</div>'+
     '<div class="kq-keys">'+["1","2","3","4","5","6","7","8","9","del","0","ok"].map(k=>'<button data-kk="'+k+'" aria-label="'+(k==="del"?"Esborrar":k==="ok"?"Acceptar":k)+'"'+(KS.ocupat?' disabled':'')+'>'+(k==="del"?"⌫":k==="ok"?ICON.check:k)+'</button>').join("")+'</div>'+
     '<button class="btn ghost sm" id="kqNou" style="margin-top:12px">Sóc nou/nova al casal: demanar accés</button><button class="btn ghost sm" id="kqMail" style="margin-top:6px">Entrar amb correu i contrasenya</button></div></div>'+
-    '<p class="kq-legal">El PIN és personal. No el diguis a ningú. · Coordinació i Direcció entren amb correu, contrasenya i doble factor. · <button class="lnk" id="kqOff">Desconnectar la tauleta</button></p></div>';
+    '<p class="kq-legal">El PIN és personal. No el diguis a ningú. · Coordinació entra amb correu i contrasenya. · <button class="lnk" id="kqOff">Desconnectar la tauleta</button></p></div>';
   clearInterval(KS.clock); KS.clock=setInterval(()=>{ const c=$("#kqClock"); if(c) c.textContent=horaAra(); else clearInterval(KS.clock); },1000);
   const press=async k=>{ if(KS.ocupat) return; KS.err="";
     if(k==="del") KS.pin=KS.pin.slice(0,-1); else if(k!=="ok" && KS.pin.length<4) KS.pin+=k;
@@ -744,7 +747,7 @@ function formUsuari(id){
     '<div class="field full"><label for="us_e">Correu electrònic</label><input id="us_e" type="email" value="'+esc(t.email||"")+'"'+(id?' disabled':'')+'></div>'+
     (t.rol==="tauleta"?'':'<div class="field"><label for="us_r">Perfil</label><select id="us_r">'+ROLS_ALTA.map(o=>'<option value="'+o[0]+'"'+(t.rol===o[0]?' selected':'')+'>'+o[1]+'</option>').join("")+'</select></div>')+
     '<div class="field"><label for="us_c">Casal</label><select id="us_c">'+[["c1","Casal de Ribes"],["c2","Casal de Roquetes"],["tots","Els dos casals"]].map(o=>'<option value="'+o[0]+'"'+(t.casal===o[0]?' selected':'')+'>'+o[1]+'</option>').join("")+'</select></div>'+
-    (id?'<label class="check full"><input type="checkbox" id="us_a"'+(t.actiu?' checked':'')+'>Actiu (si el desactives, se li tanquen totes les sessions i perd el PIN)</label>':'<p class="note full" style="margin:0">Li arribarà una invitació per correu per triar la contrasenya. Coordinació i Supervisió hauran d\'activar el doble factor el primer cop.</p>')+
+    (id?'<label class="check full"><input type="checkbox" id="us_a"'+(t.actiu?' checked':'')+'>Actiu (si el desactives, se li tanquen totes les sessions i perd el PIN)</label>':'<p class="note full" style="margin:0">Li arribarà una invitació per correu per triar la contrasenya. Supervisió haurà d\'activar el doble factor el primer cop.</p>')+
     '<div class="full alert" id="userr" hidden></div><div class="m-f full"><button type="button" class="btn ghost" data-close>Cancel·lar</button><button class="btn primary" type="submit">'+(id?'Desar':'Enviar la invitació')+'</button></div></form>');
   $("#fus").onsubmit=async e=>{ e.preventDefault(); const er=$("#userr"), btn=e.target.querySelector("[type=submit]"), v=k=>{ const x=$("#us_"+k); return x?x.value.trim():undefined; };
     const fail=m=>{ er.textContent=m; er.hidden=false; btn.disabled=false; };
