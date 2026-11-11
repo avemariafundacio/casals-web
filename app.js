@@ -90,15 +90,17 @@ const APATS_CFG = ["places","preuSoci","preuNoSoci","preuSubv","subvencionats","
 const COMPRES_CFG = ["petitoris","correu","codisClient","adreces"];
 
 function fromRows(rows){
-  const d=buit(), fitxes={};
+  const d=buit(), fitxes={}, privat={};
   for(const r of rows){ const v=r.data;
     if(r.col==="config") Object.assign(d.config, v);
     else if(r.col==="apats.config") APATS_CFG.forEach(k=>{ if(v[k]!==undefined) d.apats[k]=v[k]; });
     else if(r.col==="compres.config") COMPRES_CFG.forEach(k=>{ if(v[k]!==undefined) d.compres[k]=v[k]; });
     else if(r.col==="fitxes_socials") fitxes[r.id]=v;
+    else if(r.col==="socis_privat") privat[r.id]=v;
     else if(MAPES[r.col]) MAPES[r.col].get(d)[v.k]=v.v;
     else if(ARRAYS[r.col]) ARRAYS[r.col].get(d).push(v);
   }
+  d.socis.forEach(s=>{ if(privat[s.id]) s.priv=privat[s.id]; });
   d.socis.forEach(s=>{ const f=fitxes[s.id];
     if(f){ s.viuSol=!!f.viuSol; s.acollida=f.acollida||{completada:true}; }
     else s.acollida = diesEntre(s.alta||isoAvui(), isoAvui())<=60 ? {completada:false,entrevista:null,benvinguda:false,referent:null,revisio:null,interessos:[]} : {completada:true};
@@ -114,9 +116,11 @@ function toRecords(d){
   const prev=(col,id)=>{ const o=LAST.get(col+"|"+id)||ROWS.get(col+"|"+id); return o?o.casal:null; };
   const put=(col,id,casal,data)=>{ if(casal===undefined) casal=prev(col,id); m.set(col+"|"+id,{col,id:String(id),casal:casal??null,json:JSON.stringify(data)}); };
   for(const [col,a] of Object.entries(ARRAYS)) for(const r of a.get(d)){
-    let data=r; if(col==="socis"){ const {viuSol,acollida,...rest}=r; data=rest; }
+    let data=r; if(col==="socis"){ const {viuSol,acollida,priv,...rest}=r; data=rest; }
     put(col, a.id?a.id(r):r.id, a.casal(r,d), data);
   }
+  // Dades administratives confidencials (DNI/NIE, compte, representant): col·lecció a part, només Coordinació i Supervisió
+  if(esCoord()) d.socis.forEach(s=>{ if(s.priv&&(s.priv.dni||s.priv.iban||s.priv.repr)) put("socis_privat",s.id,s.casal,s.priv); });
   if(can("seguiment","C")) d.socis.forEach(s=>put("fitxes_socials",s.id,s.casal,{viuSol:!!s.viuSol,acollida:s.acollida}));
   for(const [col,a] of Object.entries(MAPES)) for(const [k,v] of Object.entries(a.get(d))) put(col,k,a.casal(k,d),{k,v});
   if(ROWS.has("config|main")||esCoord()) put("config","main",null,d.config);
@@ -254,7 +258,13 @@ const casal = id => D.casals.find(c=>c.id===id);
 const inCasal = x => S.casal==="tots" || (x.casal!==undefined ? x.casal : x.id)===S.casal;
 const nomComplet = s => s ? s.nom+" "+s.cognoms : "—";
 const inicials = s => esc(((s.nom||" ")[0]+(s.cognoms||" ")[0]).toUpperCase());
-const edat = s => { const b=new Date(s.naix), n=new Date(); let a=n.getFullYear()-b.getFullYear(); if(n<new Date(n.getFullYear(),b.getMonth(),b.getDate())) a--; return a; };
+/* Dades administratives confidencials (DNI/NIE, compte, representant): només Coordinació i Supervisió. */
+const dniOk = v => { const x=v.toUpperCase().replace(/[\s-]/g,""); const m=x.match(/^([XYZ]?)(\d{7,8})([A-Z])$/); if(!m) return false; const n=Number(({X:"0",Y:"1",Z:"2"}[m[1]]||"")+m[2]); return "TRWAGMYFPDXBNJZSQVHLCKE"[n%23]===m[3]; };
+const ibanNet = v => (v||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
+const ibanOk = v => { const x=ibanNet(v); if(!/^[A-Z]{2}\d{2}[A-Z0-9]{10,30}$/.test(x)) return false; if(x.startsWith("ES")&&x.length!==24) return false; const r=(x.slice(4)+x.slice(0,4)).replace(/[A-Z]/g,c=>c.charCodeAt(0)-55); let m=0; for(const c of r) m=(m*10+Number(c))%97; return m===1; };
+const ibanFmt = v => ibanNet(v).replace(/(.{4})/g,"$1 ").trim();
+const ibanMask = v => { const x=ibanNet(v); return x ? x.slice(0,4)+" •••• •••• •••• •••• "+x.slice(-4) : "—"; };
+const edat = s => { if(!s.naix) return "—"; const b=new Date(s.naix), n=new Date(); let a=n.getFullYear()-b.getFullYear(); if(n<new Date(n.getFullYear(),b.getMonth(),b.getDate())) a--; return a; };
 const mins = t => { const [h,m]=t.split(":").map(Number); return h*60+m; };
 const avuiIdx = () => { const d=new Date().getDay(); return d>=1&&d<=5 ? d-1 : 0; };
 const esAvuiLaborable = () => { const d=new Date().getDay(); return d>=1&&d<=5; };
@@ -274,7 +284,9 @@ function baixa(a, sid){
   } else a.espera = a.espera.filter(x=>x!==sid);
   save(); return promo;
 }
+const salaLliure = id => { const x=D.sales.find(y=>y.id===id); return !!(x&&x.perAssignar); };
 function conflicte(salaId, dia, inici, fi, ignoreId){
+  if(salaLliure(salaId)) return null;
   const a0=mins(inici), a1=mins(fi);
   const ov = (b0,b1)=> a0<mins(b1) && mins(b0)<a1;
   const act = D.activitats.find(a=>a.id!==ignoreId && !a.data && a.sala===salaId && a.dia===dia && ov(a.inici,a.fi));
@@ -286,13 +298,16 @@ function conflicte(salaId, dia, inici, fi, ignoreId){
 
 /* Activitats puntuals (un sol dia, camp "data") i sessions anul·lades de les periòdiques (camp "anul"). */
 const esPunt = a => !!a.data;
+const exA = (a,id) => (a.ext&&a.ext[id])||{};
 const anulada = (a,d) => (a.anul||[]).some(x=>x.d===d);
-const actEnData = (a,d) => esPunt(a) ? a.data===d : (wd(d)===a.dia && !anulada(a,d));
+const dinsCurs = (a,d) => (!a.dIni||d>=a.dIni) && (!a.dFi||d<=a.dFi);
+const actEnData = (a,d) => esPunt(a) ? a.data===d : (wd(d)===a.dia && !anulada(a,d) && dinsCurs(a,d));
 const quan = a => esPunt(a) ? DIES7[wd(a.data)]+" "+fdata(a.data) : DIES[a.dia];
 const ordAct = (a,b) => (esPunt(a)-esPunt(b)) || (esPunt(a) ? a.data.localeCompare(b.data) : a.dia-b.dia) || mins(a.inici)-mins(b.inici);
 const lesMeves = a => !esResp() || S.simRol || (a.resp||[]).includes(S.user);
 /* Coincidències en una data concreta: activitats periòdiques (si aquella sessió no està anul·lada), puntuals i reserves. */
 function conflicteData(salaId, data, b0, b1, ignoreId){
+  if(salaLliure(salaId)) return null;
   const a1=mins(b1), ov=(x0,x1)=> mins(x0)<a1 && mins(b0)<mins(x1);
   const p = D.activitats.find(a=>a.id!==ignoreId && a.sala===salaId && esPunt(a) && a.data===data && ov(a.inici,a.fi));
   if(p) return {tipus:"puntual", act:p, txt:"Coincideix amb l'activitat puntual «"+p.nom+"» ("+p.inici+"–"+p.fi+")."};
@@ -323,7 +338,7 @@ function alertesDe(s){
     else { const due=addDays(ac.entrevista,30), q=diesEntre(AV,due); if(q<=5) out.push({t: q<0?"Revisió dels 30 dies endarrerida":"Revisió dels 30 dies en "+q+" dies",c:q<0?"crit":"warn",k:"acollida"}); }
   }
   const nIns=activitatsDe(s.id).length;
-  if(ac.completada && nIns && diesEntre(s.alta,AV)>30){ const last=p&&p.last; const dd=last?diesEntre(last,AV):null; if(dd===null||dd>21) out.push({t: dd===null?"No ha vingut a cap activitat":"Fa "+dd+" dies que no ve",c:"crit",k:"participacio"}); }
+  if(ac.completada && nIns && diesEntre(s.segDes&&s.segDes>s.alta?s.segDes:s.alta,AV)>30){ /* segDes: data des de la qual es compta l'assistència (persones importades) */ const last=p&&p.last; const dd=last?diesEntre(last,AV):null; if(dd===null||dd>21) out.push({t: dd===null?"No ha vingut a cap activitat":"Fa "+dd+" dies que no ve",c:"crit",k:"participacio"}); }
   const ab=absApats(s.id); if(ab>=2) out.push({t:ab+" absències als àpats en 14 dies",c:"crit",k:"apats"});
   return out;
 }
@@ -997,7 +1012,7 @@ function fitxaSoci(id){
   const aut=[["imatge","Drets d'imatge"],["dades","Tractament de dades"],["domiciliacio","Domiciliació bancària"]];
   const ac=s.acollida||{completada:true}, pp=participacio()[id], al=alertesDe(s), segs=D.seguiments.filter(x=>x.soci===id).sort((a,b)=>b.data.localeCompare(a.data)), dv=derivOberta(id);
   const html = hdr(nomComplet(s), "Persona usuària · núm. "+s.num, '<button class="btn sm" id="edSoci">Editar</button>')+
-  '<div class="who"><span class="avatar" style="width:56px;height:56px;font-size:18px">'+inicials(s)+'</span><div><b>'+edat(s)+' anys</b><small>'+esc(casal(s.casal).nom)+' · alta '+new Date(s.alta).toLocaleDateString("ca-ES",{month:"long",year:"numeric"})+'</small></div><div style="margin-left:auto">'+estatPersona(s)+'</div></div>'+
+  '<div class="who"><span class="avatar" style="width:56px;height:56px;font-size:18px">'+inicials(s)+'</span><div><b>'+(s.naix?edat(s)+' anys':'Edat no informada')+'</b><small>'+esc(casal(s.casal).nom)+' · alta '+new Date(s.alta).toLocaleDateString("ca-ES",{month:"long",year:"numeric"})+'</small></div><div style="margin-left:auto">'+estatPersona(s)+'</div></div>'+
   (s.baixa?'<div class="note">Baixa des del '+fdata(s.baixa.data)+'. Motiu: '+esc(s.baixa.motiu)+'</div>':'')+
   (al.length?'<div class="sens" style="display:flex;flex-direction:column;gap:6px">'+al.map(a=>'<div class="alert" style="background:var(--'+(a.c==="crit"?"crit":"warn")+'-soft);color:var(--'+(a.c==="crit"?"crit":"warn")+')">'+esc(a.t)+'</div>').join("")+'</div>':'')+
   '<div class="sens" style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" id="fsSeg">Registrar seguiment</button>'+(dv?'<span class="chip warn">Derivada a '+esc(dv.a)+' · '+esc(dv.estat)+'</span>':'<button class="btn sm" id="fsDer">Derivar</button>')+(!ac.completada?'<button class="btn sm primary" id="fsAco">Acollida</button>':'')+'</div>'+
@@ -1005,6 +1020,7 @@ function fitxaSoci(id){
   (!ac.completada?'<div class="sens"><div class="section-t">Acollida</div>'+passosAcollida(s)+'</div>':'')+
   '<div class="sens"><div class="section-t">Seguiments ('+segs.length+')</div><div class="list">'+(segs.slice(0,4).map(g=>'<div class="row"><div class="t"><b>'+esc(g.tipus)+' · '+fdata(g.data)+'</b><span style="white-space:normal">'+esc(g.nota)+'</span></div></div>').join("")||'<div class="empty">Sense seguiments registrats.</div>')+'</div></div>'+
   '<div><div class="section-t">Contacte</div><dl class="dl" style="margin-top:8px"><dt>Telèfon</dt><dd class="num">'+esc(s.tel)+'</dd><dt>Domicili</dt><dd>'+(s.domicili?esc(s.domicili):'—')+'</dd><dt>Correu</dt><dd>'+(s.email?esc(s.email):'—')+'</dd><dt>Persona de referència</dt><dd>'+(s.contacte?esc(s.contacte):'—')+'</dd><dt>Derivat de</dt><dd>'+(s.derivat?esc(s.derivat):'—')+'</dd></dl></div>'+
+  (esCoord()?'<div><div class="section-t">Dades administratives <span class="chip" style="margin-left:6px">Confidencial</span></div><dl class="dl" style="margin-top:8px"><dt>DNI/NIE</dt><dd class="num">'+esc((s.priv&&s.priv.dni)||"—")+'</dd><dt>Compte bancari</dt><dd class="num"><span id="fsIban">'+esc(ibanMask(s.priv&&s.priv.iban))+'</span>'+(s.priv&&s.priv.iban?' <button class="btn sm ghost" id="fsIbanVeure">Mostrar</button>':'')+'</dd><dt>Representant legal</dt><dd>'+esc((s.priv&&s.priv.repr)||"—")+'</dd></dl></div>':'')+
   '<div><div class="section-t">Autoritzacions</div><div style="display:flex;flex-direction:column;gap:8px;margin-top:8px">'+aut.map(a=>'<div style="display:flex;justify-content:space-between"><span>'+a[1]+'</span>'+(s.aut[a[0]]?'<span class="chip good">Signada</span>':'<span class="chip">No</span>')+'</div>').join("")+'</div></div>'+
   (s.obs?'<div><div class="section-t">Observacions per a l\'activitat</div><p class="note" style="margin:8px 0 0">'+esc(s.obs)+'</p></div>':'')+
   '<div><div class="section-t">Activitats ('+acts.length+')</div><div class="list" style="margin-top:4px">'+(acts.length? acts.map(a=>'<div class="row"><div class="t"><b>'+esc(a.nom)+'</b><span>'+quan(a)+' '+a.inici+'</span></div><button class="btn sm ghost danger" data-baixa="'+a.id+'">Donar de baixa</button></div>').join("") : '<div class="empty">Encara no fa cap activitat.</div>')+
@@ -1014,6 +1030,7 @@ function fitxaSoci(id){
   const o=overlay(html,true);
   o.querySelectorAll("[data-baixa]").forEach(b=>b.onclick=()=>{ const a=D.activitats.find(x=>x.id===b.dataset.baixa); const p=baixa(a,id); toast(p? "Baixa feta. "+soci(p).nom+" passa de la llista d'espera a inscrit/a." : "Baixa feta."); render(); fitxaSoci(id); });
   o.querySelector("#edSoci").onclick=()=>formSoci(id);
+  const iv=o.querySelector("#fsIbanVeure"); if(iv) iv.onclick=()=>{ o.querySelector("#fsIban").textContent=ibanFmt(s.priv.iban); iv.remove(); logCanvi("Consulta del compte bancari",nomComplet(s)); save(); };
   o.querySelector("#fsSeg").onclick=()=>formSeguiment(id);
   const fd=o.querySelector("#fsDer"); if(fd) fd.onclick=()=>formDerivacio(id);
   const fa=o.querySelector("#fsAco"); if(fa) fa.onclick=()=>formAcollida(id);
@@ -1029,6 +1046,7 @@ function formSoci(id){
   const f=(k,l,t,full)=>'<div class="field'+(full?' full':'')+'"><label for="f_'+k+'">'+l+'</label><input id="f_'+k+'" type="'+(t||"text")+'" value="'+esc(s[k])+'"></div>';
   overlay(hdr(id?"Editar persona":"Nova persona usuària", id?"Núm. "+s.num:"Alta")+
   '<form class="form" id="fs" novalidate>'+f("nom","Nom")+f("cognoms","Cognoms")+f("naix","Data de naixement","date")+f("tel","Telèfon","tel")+f("domicili","Domicili","text",true)+f("email","Correu (opcional)","email",true)+f("contacte","Persona de referència (opcional)","text",true)+f("derivat","Derivat de (opcional)","text",true)+
+  (esCoord()?'<div class="full section-t" style="margin-top:4px">Dades administratives (confidencials)</div><div class="field"><label for="f_dni">DNI/NIE (opcional)</label><input id="f_dni" value="'+esc((s.priv&&s.priv.dni)||"")+'" autocomplete="off"></div><div class="field"><label for="f_iban">Compte bancari IBAN (opcional)</label><input id="f_iban" value="'+esc(ibanFmt(s.priv&&s.priv.iban))+'" autocomplete="off"></div><div class="field full"><label for="f_repr">Representant legal (opcional)</label><input id="f_repr" value="'+esc((s.priv&&s.priv.repr)||"")+'"></div>':'')+
   '<div class="field"><label for="f_casal">Casal</label><select id="f_casal">'+D.casals.map(c=>'<option value="'+c.id+'"'+(s.casal===c.id?' selected':'')+'>'+esc(c.nom)+'</option>').join("")+'</select></div>'+
   '<label class="check" style="align-self:end;padding-bottom:10px"><input type="checkbox" id="f_entitat"'+(s.entitat?' checked':'')+'>Membre de l\'entitat del casal</label>'+
   '<label class="check full"><input type="checkbox" id="f_viusol"'+(s.viuSol?' checked':'')+'>Viu sol/a <span style="color:var(--muted);font-size:13px">(serveix per detectar solitud; cal ampliar l\'Annex 4)</span></label>'+
@@ -1043,11 +1061,16 @@ function formSoci(id){
     D.socis=D.socis.filter(x=>x.id!==id); logCanvi("Esborrat de persona","Núm. "+s.num,m); save(); toast("Persona esborrada."); render(); });
   $("#fs").onsubmit=e=>{ e.preventDefault();
     const v=k=>$("#f_"+k).value.trim();
-    if(!v("nom")||!v("cognoms")||!v("tel")){ const er=$("#ferr"); er.textContent="Cal omplir nom, cognoms i telèfon."; er.hidden=false; return; }
-    if(!$("#f_a_dades").checked){ const er=$("#ferr"); er.textContent="Sense l'autorització de tractament de dades no es pot donar d'alta."; er.hidden=false; return; }
+    const ferr=t=>{ const er=$("#ferr"); er.textContent=t; er.hidden=false; };
+    if(!v("nom")||!v("cognoms")||(!id&&!v("tel"))) return ferr(id?"Cal omplir nom i cognoms.":"Cal omplir nom, cognoms i telèfon.");
+    if($("#f_dni")&&v("dni")&&!dniOk(v("dni"))) return ferr("El DNI/NIE no és correcte (revisa la lletra).");
+    if($("#f_iban")&&v("iban")&&!ibanOk(v("iban"))) return ferr("El compte bancari (IBAN) no és correcte.");
+    if(!id&&!$("#f_a_dades").checked) return ferr("Sense l'autorització de tractament de dades no es pot donar d'alta.");
     const obj = id ? s : {id:uid("p"), num:Math.max(...D.socis.map(x=>x.num))+1, alta:isoAvui(), acollida:{completada:false,entrevista:null,benvinguda:false,referent:null,revisio:null,interessos:[]}};
     Object.assign(obj,{nom:v("nom"),cognoms:v("cognoms"),naix:v("naix")||"1950-01-01",tel:v("tel"),domicili:v("domicili"),email:v("email"),contacte:v("contacte"),derivat:v("derivat"),casal:v("casal"),entitat:$("#f_entitat").checked,viuSol:$("#f_viusol").checked,obs:v("obs"),
-      aut:{imatge:$("#f_a_imatge").checked,dades:true,domiciliacio:$("#f_a_domiciliacio").checked}});
+      aut:{imatge:$("#f_a_imatge").checked,dades:$("#f_a_dades").checked,domiciliacio:$("#f_a_domiciliacio").checked}});
+    if($("#f_dni")){ const pv={dni:v("dni").toUpperCase().replace(/[\s-]/g,""),iban:ibanNet(v("iban")),repr:v("repr")}; const ant=JSON.stringify(obj.priv||{});
+      if(pv.dni||pv.iban||pv.repr) obj.priv=pv; else delete obj.priv; if(id&&ant!==JSON.stringify(obj.priv||{})) logCanvi("Canvi de dades administratives",nomComplet(obj)); }
     if(!id) D.socis.unshift(obj); save(); closeOverlay();
     toast(id? "Canvis desats." : obj.nom+" té el núm. "+obj.num+". Comença l'acollida."); if(!id){ S.view="socis"; } render(); if(id) fitxaSoci(id);
   };
@@ -1062,7 +1085,7 @@ VIEWS.activitats = () => {
   (esResp()&&!acts.length?'<div class="empty">Encara no tens cap activitat assignada. Parla amb la coordinació.</div>':'')+
   '<div class="cards">'+acts.map(a=>{ const full=a.inscrits.length>=a.places, pct=Math.min(100,a.inscrits.length/a.places*100);
     return '<article class="card"><div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start"><h3>'+esc(a.nom)+'</h3>'+eixChip(a.eix)+'</div>'+
-    (esPunt(a)?'<div><span class="chip" style="background:var(--accent-soft,#EEE8FF);color:var(--accent,#6C4BD8)">Puntual'+(a.data<isoAvui()?' · feta':'')+'</span></div>':'')+(prop(a).length?'<div>'+prop(a).slice(0,2).map(x=>'<span class="chip warn">No es fa '+fdata(x.d)+'</span> ').join("")+'</div>':'')+
+    (esPunt(a)?'<div><span class="chip" style="background:var(--accent-soft,#EEE8FF);color:var(--accent,#6C4BD8)">Puntual'+(a.data<isoAvui()?' · feta':'')+'</span></div>':'')+(!esPunt(a)&&(a.dIni>isoAvui()||a.dFi)?'<div>'+(a.dIni>isoAvui()?'<span class="chip">Comença el '+fdata(a.dIni)+'</span> ':'')+(a.dFi?'<span class="chip'+(a.dFi<isoAvui()?' warn':'')+'">'+(a.dFi<isoAvui()?'Acabada el ':'Fins al ')+fdata(a.dFi)+'</span>':'')+'</div>':'')+(prop(a).length?'<div>'+prop(a).slice(0,2).map(x=>'<span class="chip warn">No es fa '+fdata(x.d)+'</span> ').join("")+'</div>':'')+
     '<div class="meta"><span>'+quan(a)+' · '+a.inici+'–'+a.fi+'</span><span>'+esc(sala(a.sala).nom)+(S.casal==="tots"?' · '+esc(casal(a.casal).nom):'')+'</span><span>'+esc(a.prof)+' · '+(a.preu?eur(a.preu)+(esPunt(a)?'':' / mes'):'Gratuïta')+(a.comp?' · Complementària':'')+'</span></div>'+
     '<div><div class="places"><span class="num"><b>'+a.inscrits.length+'</b> / '+a.places+' places</span>'+(full?'<span class="chip warn">Plena · '+a.espera.length+' en espera</span>':'<span style="color:var(--muted)">'+(a.places-a.inscrits.length)+' lliures</span>')+'</div><div class="bar'+(full?' full':'')+'" style="margin-top:8px"><i style="width:'+pct+'%"></i></div></div>'+
     '<div class="actions"><button class="btn sm primary" data-ins="'+a.id+'">Inscriure</button><button class="btn sm" data-llista="'+a.id+'">Llista</button></div></article>'; }).join("")+'</div>';
@@ -1084,8 +1107,8 @@ function inscriureModal(aid, q){
   const qi=$("#qi"); qi.oninput=()=>{ const p=qi.selectionStart; inscriureModal(aid, qi.value); const n=$("#qi"); n.focus(); n.setSelectionRange(p,p); };
   document.querySelectorAll(".modal [data-s]").forEach(b=>b.onclick=()=>{ const s=soci(b.dataset.s); const r=inscriure(a,s.id); toast(r==="inscrit"? s.nom+" inscrit/a." : s.nom+" a la llista d'espera (posició "+a.espera.length+")."); render(); inscriureModal(aid, $("#qi")?$("#qi").value:""); });
 }
-function darreraSessio(a){ if(esPunt(a)) return a.data; let d=isoAvui(); for(let i=0;i<35;i++){ if(wd(d)===a.dia && !anulada(a,d)) return d; d=addDays(d,-1); } return d; }
-function properesSessions(a,n){ const out=[]; let d=isoAvui(); for(let i=0;i<120&&out.length<n;i++){ if(wd(d)===a.dia && !anulada(a,d)) out.push(d); d=addDays(d,1); } return out; }
+function darreraSessio(a){ if(esPunt(a)) return a.data; let d=isoAvui(); for(let i=0;i<35;i++){ if(actEnData(a,d)) return d; d=addDays(d,-1); } return a.dFi&&a.dFi<isoAvui()?a.dFi:d; }
+function properesSessions(a,n){ const out=[]; let d=isoAvui(); for(let i=0;i<120&&out.length<n;i++){ if(actEnData(a,d)) out.push(d); d=addDays(d,1); } return out; }
 function anularSessio(aid){
   const a=D.activitats.find(x=>x.id===aid), ds=properesSessions(a,10), fets=(a.anul||[]).filter(x=>x.d>=isoAvui()).sort((x,y)=>x.d.localeCompare(y.d));
   overlay(hdr("Anul·lar una sessió", a.nom+" · cada "+DIES[a.dia].toLowerCase())+'<p class="note" style="margin:0">Només s\'anul·la la sessió del dia que triïs. L\'activitat continua igual les altres setmanes.</p>'+
@@ -1103,12 +1126,15 @@ function llistaAct(aid){
   overlay(hdr(a.nom, quan(a)+" "+a.inici+"–"+a.fi+" · "+sala(a.sala).nom)+
   (can("activitats","M")||can("activitats","B")?'<div style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap">'+(can("activitats","M")?'<button class="btn sm" id="edAct">Editar</button>'+(esPunt(a)?'':'<button class="btn sm" id="anAct">Anul·lar una sessió</button>'):'')+(can("activitats","B")?'<button class="btn sm ghost danger" id="delAct">Esborrar activitat</button>':'')+'</div>':'')+
   '<div class="note">Passar llista de la sessió de '+DIES7[wd(ses)].toLowerCase()+' '+fdata(ses)+': '+pres.length+' de '+a.inscrits.length+' presents.</div>'+
-  '<div><div class="section-t">Inscrits ('+a.inscrits.length+'/'+a.places+')</div><div class="list">'+(a.inscrits.map((id,i)=>{const s=soci(id); const hi=pres.includes(id); return '<div class="row"><span class="num" style="width:22px;color:var(--muted)">'+(i+1)+'</span><div class="t"><b>'+esc(nomComplet(s))+'</b>'+(can("persones","C")?'<span class="num">'+esc(s.tel)+'</span>':'')+'</div><button class="tog" data-pl="'+id+'" aria-pressed="'+hi+'">'+(hi?'Present':'Absent')+'</button><button class="btn sm ghost danger" data-b="'+id+'">Baixa</button></div>';}).join("")||'<div class="empty">Encara no hi ha inscrits.</div>')+'</div></div>'+
+  (a.extres?'<div class="note">Autocar: <b>'+a.inscrits.filter(x=>exA(a,x).au).length+'</b> · Transport adaptat: <b>'+a.inscrits.filter(x=>exA(a,x).ta).length+'</b></div>':'')+
+  '<div><div class="section-t">Inscrits ('+a.inscrits.length+'/'+a.places+')</div><div class="list">'+(a.inscrits.map((id,i)=>{const s=soci(id); const hi=pres.includes(id); return '<div class="row"><span class="num" style="width:22px;color:var(--muted)">'+(i+1)+'</span><div class="t"><b>'+esc(nomComplet(s))+'</b>'+(can("persones","C")?'<span class="num">'+esc(s.tel)+'</span>':'')+(a.extres?'<span style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px"><button class="tog" data-ex="au|'+id+'" aria-pressed="'+!!exA(a,id).au+'">Autocar</button><button class="tog" data-ex="ta|'+id+'" aria-pressed="'+!!exA(a,id).ta+'">T. adaptat</button><input data-exc="'+id+'" value="'+esc(exA(a,id).ct||"")+'" placeholder="Persona de contacte i telèfon" aria-label="Persona de contacte de '+esc(nomComplet(s))+'" style="flex:1;min-width:160px"></span>':'')+'</div><button class="tog" data-pl="'+id+'" aria-pressed="'+hi+'">'+(hi?'Present':'Absent')+'</button><button class="btn sm ghost danger" data-b="'+id+'">Baixa</button></div>';}).join("")||'<div class="empty">Encara no hi ha inscrits.</div>')+'</div></div>'+
   '<div><div class="section-t">Llista d\'espera ('+a.espera.length+')</div><div class="list">'+(a.espera.map((id,i)=>{const s=soci(id); return '<div class="row"><span class="chip warn num">'+(i+1)+'</span><div class="t"><b>'+esc(nomComplet(s))+'</b><span>Entrarà quan quedi una plaça</span></div><button class="btn sm ghost" data-b="'+id+'">Treure</button></div>';}).join("")||'<div class="empty">Ningú en espera.</div>')+'</div></div>');
   document.querySelectorAll(".modal [data-b]").forEach(b=>b.onclick=()=>{ const p=baixa(a,b.dataset.b); toast(p? soci(p).nom+" entra des de la llista d'espera." : "Fet."); render(); llistaAct(aid); });
   const ea=$("#edAct"); if(ea) ea.onclick=()=>formAct(aid);
   const aa=$("#anAct"); if(aa) aa.onclick=()=>anularSessio(aid);
   const da=$("#delAct"); if(da) da.onclick=()=>confirmMotiu("Esborrar "+a.nom,"Se n'esborren les inscripcions i la llista d'espera. Si només s'atura, millor no esborrar-la.","Esborrar",m=>{ D.activitats=D.activitats.filter(x=>x.id!==a.id); D.rebuts=D.rebuts.filter(r=>r.act!==a.id||D.mesosTancats[r.mes]); logCanvi("Esborrat d'activitat",a.nom+" · "+casal(a.casal).curt,m); save(); toast("Activitat esborrada."); render(); });
+  document.querySelectorAll(".modal [data-ex]").forEach(b=>b.onclick=()=>{ const [k,x]=b.dataset.ex.split("|"); const e=a.ext||(a.ext={}); const o=e[x]||(e[x]={}); o[k]=!o[k]; save(); llistaAct(aid); });
+  document.querySelectorAll(".modal [data-exc]").forEach(i=>i.onchange=()=>{ const e=a.ext||(a.ext={}); const o=e[i.dataset.exc]||(e[i.dataset.exc]={}); o.ct=i.value.trim().slice(0,120); save(); });
   document.querySelectorAll(".modal [data-pl]").forEach(b=>b.onclick=()=>{ const arr=D.assist[key]||(D.assist[key]=[]); const x=b.dataset.pl; const k=arr.indexOf(x); if(k>=0) arr.splice(k,1); else arr.push(x); save(); llistaAct(aid); });
 }
 function formAct(id){
@@ -1130,6 +1156,9 @@ function formAct(id){
   '<div class="field"><label for="a_sala">Sala</label><select id="a_sala">'+ss.map(s=>'<option value="'+s.id+'"'+(x.sala===s.id?' selected':'')+'>'+esc(s.nom)+' ('+s.aforament+')</option>').join("")+'</select></div>'+
   '<div class="field"><label for="a_pl">Places</label><input id="a_pl" type="number" min="1" value="'+x.places+'"></div>'+
   '<div class="field"><label for="a_prof">Qui la fa</label><input id="a_prof" value="'+esc(x.prof==="Per assignar"?"":x.prof)+'" placeholder="Monitor/a, entitat o voluntariat"></div>'+
+  (tipus0==="punt"?'':'<div class="field"><label for="a_dini">Comença (opcional)</label><input id="a_dini" type="date" value="'+esc(x.dIni||"")+'"></div><div class="field"><label for="a_dfi">Acaba (opcional)</label><input id="a_dfi" type="date" value="'+esc(x.dFi||"")+'"></div>')+
+  (esCoord()?'<div class="field"><label for="a_ptel">Telèfon de qui la fa (opcional)</label><input id="a_ptel" type="tel" value="'+esc(x.profTel||"")+'"></div>':'')+
+  (tipus0==="punt"?'<label class="check full"><input type="checkbox" id="a_ext"'+(x.extres?' checked':'')+'>A la llista: autocar, transport adaptat i persona de contacte (sortides i festes)</label>':'')+
   '<div class="field"><label for="a_preu">Preu (€'+(tipus0==="punt"?'':' / mes')+')</label><input id="a_preu" type="number" min="0" step="0.5" value="'+(x.preu||0)+'"></div>'+
   '<div class="field full"><label>Talleristes i voluntariat que passen llista</label>'+(resps.length?'<div style="display:flex;flex-wrap:wrap;gap:10px">'+resps.map(t=>'<label class="check"><input type="checkbox" data-resp="'+t.id+'"'+((x.resp||[]).includes(t.id)?' checked':'')+'>'+esc(nomT(t))+' · '+esc(ROLS[t.rol])+'</label>').join("")+'</div>':'<p class="note" style="margin:0">No hi ha talleristes ni voluntariat donats d\'alta en aquest casal. La Supervisió els dona d\'alta a Equip.</p>')+'</div>'+
   '<div class="full alert" id="aerr" hidden></div><div class="m-f full"><button type="button" class="btn ghost" data-close>Cancel·lar</button><button class="btn primary" type="submit">'+(id?'Desar canvis':'Crear activitat')+'</button></div></form>');
@@ -1137,7 +1166,8 @@ function formAct(id){
   const desar=(anulAct, data)=>{ const v=k=>$("#a_"+k).value.trim(); const sl=sala(v("sala"));
     const resp=[...document.querySelectorAll("[data-resp]")].filter(c=>c.checked).map(c=>c.dataset.resp);
     const o={nom:v("nom"),eix:v("eix"),inici:v("ini"),fi:v("fi"),sala:sl.id,places:Number(v("pl")),preu:Number(v("preu"))||0,prof:v("prof")||"Per assignar",resp};
-    if(tipus0==="punt"){ o.data=data; o.dia=wd(data); } else o.dia=Number(v("dia"));
+    if(tipus0==="punt"){ o.data=data; o.dia=wd(data); o.extres=$("#a_ext").checked; } else { o.dia=Number(v("dia")); o.dIni=v("dini")||null; o.dFi=v("dfi")||null; }
+    if($("#a_ptel")) o.profTel=v("ptel");
     if(anulAct){ anulAct.anul=anulAct.anul||[]; anulAct.anul.push({d:data,m:"Coincideix amb l'activitat puntual «"+o.nom+"»"}); logCanvi("Sessió anul·lada",anulAct.nom+" · "+fdata(data),"Coincideix amb l'activitat puntual «"+o.nom+"»"); }
     if(a0){ Object.assign(a0,o); logCanvi("Canvi d'activitat",o.nom+" · "+casal(cs).curt); }
     else { D.activitats.push(Object.assign({id:uid("a"),casal:cs,inscrits:[],espera:[],anul:[]},o)); logCanvi(tipus0==="punt"?"Nova activitat puntual":"Nova activitat",o.nom+" · "+(tipus0==="punt"?fdata(data):DIES[o.dia])+" · "+casal(cs).curt); }
@@ -1157,9 +1187,10 @@ function formAct(id){
         $("#aAnul").onclick=()=>desar(c.act,d); return; }
       if(c) return err("La sala està ocupada aquell dia. "+c.txt);
       return desar(null,d); }
+    if(v("dini")&&v("dfi")&&v("dfi")<v("dini")) return err("La data final ha de ser posterior a la d'inici.");
     const c=conflicte(sl.id,Number(v("dia")),v("ini"),v("fi"),id); if(c) return err("La sala està ocupada. "+c);
     const dia=Number(v("dia")), a1=mins(v("fi")), b0=v("ini");
-    const pf=D.activitats.find(a=>a.id!==id&&esPunt(a)&&a.data>=isoAvui()&&a.sala===sl.id&&wd(a.data)===dia&&mins(a.inici)<a1&&mins(b0)<mins(a.fi));
+    const pf=!sl.perAssignar&&D.activitats.find(a=>a.id!==id&&esPunt(a)&&a.data>=isoAvui()&&a.sala===sl.id&&wd(a.data)===dia&&mins(a.inici)<a1&&mins(b0)<mins(a.fi));
     if(pf) return err("El "+fdata(pf.data)+" hi ha l'activitat puntual «"+pf.nom+"» a la mateixa sala i hora. Canvia l'horari o la sala, o anul·la aquella sessió després de crear l'activitat.");
     desar(null,null); };
 }
@@ -1170,7 +1201,7 @@ VIEWS.sales = () => {
   const top=t=>(mins(t)-H0*60)/60*PX;
   const dl=addDays(isoAvui(),-avuiIdx7());
   const cols=DIES.map((d,di)=>{ const dt=addDays(dl,di);
-    const evs=D.activitats.filter(a=>a.sala===sl.id&&(esPunt(a)?a.data===dt:a.dia===di)).map(a=>{ const an=!esPunt(a)&&anulada(a,dt); return '<div class="ev" style="top:'+top(a.inici)+'px;height:'+(top(a.fi)-top(a.inici)-2)+'px;color:var(--'+a.eix+')'+(an?';opacity:.45;text-decoration:line-through':'')+'"><b>'+(esPunt(a)?'★ ':'')+esc(a.nom)+'</b><span class="num">'+a.inici+'–'+a.fi+(an?' · no es fa':'')+'</span></div>'; }).join("");
+    const evs=D.activitats.filter(a=>a.sala===sl.id&&(esPunt(a)?a.data===dt:a.dia===di&&dinsCurs(a,dt))).map(a=>{ const an=!esPunt(a)&&anulada(a,dt); return '<div class="ev" style="top:'+top(a.inici)+'px;height:'+(top(a.fi)-top(a.inici)-2)+'px;color:var(--'+a.eix+')'+(an?';opacity:.45;text-decoration:line-through':'')+'"><b>'+(esPunt(a)?'★ ':'')+esc(a.nom)+'</b><span class="num">'+a.inici+'–'+a.fi+(an?' · no es fa':'')+'</span></div>'; }).join("");
     const rs=D.reserves.filter(r=>r.sala===sl.id&&r.dia===di).map(r=>'<div class="ev res" style="top:'+top(r.inici)+'px;height:'+(top(r.fi)-top(r.inici)-2)+'px"><b>'+esc(r.entitat)+'</b><span>'+esc(r.motiu)+' · '+r.inici+'–'+r.fi+'</span></div>').join("");
     return '<div class="col" style="height:'+((H1-H0)*PX)+'px">'+evs+rs+'</div>';
   }).join("");
