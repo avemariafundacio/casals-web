@@ -1201,24 +1201,44 @@ function formAct(id){
     desar(null,null); };
 }
 
+/* Calendari d'espais: totes les sales alhora o una sola; les activitats que coincideixen
+   es posen una al costat de l'altra (carrils), perquè no se'n tapi cap. */
+function carrils(items){
+  items.sort((a,b)=>a.t0-b.t0||b.t1-a.t1);
+  let grup=[], fiGrup=-1; const grups=[];
+  items.forEach(it=>{ if(it.t0>=fiGrup&&grup.length){ grups.push(grup); grup=[]; } grup.push(it); fiGrup=Math.max(fiGrup,it.t1); });
+  if(grup.length) grups.push(grup);
+  grups.forEach(g=>{ const fins=[]; g.forEach(it=>{ let k=fins.findIndex(f=>f<=it.t0); if(k<0){ k=fins.length; fins.push(0); } fins[k]=it.t1; it.k=k; }); g.forEach(it=>it.n=fins.length); });
+  return items;
+}
 VIEWS.sales = () => {
-  const ss=D.sales.filter(inCasal); if(!S.sala||!ss.find(s=>s.id===S.sala)) S.sala=ss[0].id;
-  const sl=sala(S.sala); const H0=9, H1=21, PX=48;
-  const top=t=>(mins(t)-H0*60)/60*PX;
+  const ss=D.sales.filter(inCasal); if(!S.sala||(S.sala!=="tots"&&!ss.find(s=>s.id===S.sala))) S.sala="tots";
+  const totes=S.sala==="tots", sl=totes?null:sala(S.sala), ids=new Set(totes?ss.map(s=>s.id):[sl.id]);
   const dl=addDays(isoAvui(),-avuiIdx7());
-  const cols=DIES.map((d,di)=>{ const dt=addDays(dl,di);
-    const evs=D.activitats.filter(a=>a.sala===sl.id&&(esPunt(a)?a.data===dt:a.dia===di&&dinsCurs(a,dt))).map(a=>{ const an=!esPunt(a)&&anulada(a,dt); return '<div class="ev" style="top:'+top(a.inici)+'px;height:'+(top(a.fi)-top(a.inici)-2)+'px;color:var(--'+a.eix+')'+(an?';opacity:.45;text-decoration:line-through':'')+'"><b>'+(esPunt(a)?'★ ':'')+esc(a.nom)+'</b><span class="num">'+a.inici+'–'+a.fi+(an?' · no es fa':'')+'</span></div>'; }).join("");
-    const rs=D.reserves.filter(r=>r.sala===sl.id&&r.dia===di).map(r=>'<div class="ev res" style="top:'+top(r.inici)+'px;height:'+(top(r.fi)-top(r.inici)-2)+'px"><b>'+esc(r.entitat)+'</b><span>'+esc(r.motiu)+' · '+r.inici+'–'+r.fi+'</span></div>').join("");
-    return '<div class="col" style="height:'+((H1-H0)*PX)+'px">'+evs+rs+'</div>';
+  const dies=DIES7.map((d,di)=>({d,di,dt:addDays(dl,di)}));
+  const evDia=x=>{ const acts=D.activitats.filter(a=>ids.has(a.sala)&&(esPunt(a)?a.data===x.dt:a.dia===x.di&&dinsCurs(a,x.dt)));
+    const res=D.reserves.filter(r=>ids.has(r.sala)&&r.dia===x.di);
+    return acts.map(a=>({a,t0:mins(a.inici),t1:mins(a.fi)})).concat(res.map(r=>({r,t0:mins(r.inici),t1:mins(r.fi)}))); };
+  const tots=dies.map(evDia), plans=tots.flat();
+  const visibles=dies.filter((x,i)=>i<5||tots[i].length);   // dissabte i diumenge, només si hi ha alguna cosa
+  const H0=Math.min(9,...plans.map(e=>Math.floor(e.t0/60))), H1=Math.max(21,...plans.map(e=>Math.ceil(e.t1/60))), PX=60;
+  const top=m=>(m-H0*60)/60*PX;
+  const W0=totes?170:130, amples=visibles.map(x=>Math.max(W0,Math.max(1,...carrils(evDia(x)).map(i=>i.n))*92));
+  const cols=visibles.map(x=>{ const its=carrils(evDia(x));
+    return '<div class="col" style="height:'+((H1-H0)*PX)+'px">'+its.map(it=>{
+      const pos='top:'+top(it.t0)+'px;height:'+Math.max(22,top(it.t1)-top(it.t0)-2)+'px;left:calc('+(it.k*100/it.n)+'% + 3px);width:calc('+(100/it.n)+'% - 6px);right:auto';
+      if(it.r){ const r=it.r; return '<div class="ev res" style="'+pos+'" title="'+esc(r.entitat+" · "+r.motiu+" · "+r.inici+"–"+r.fi+" · "+sala(r.sala).nom)+'"><b>'+esc(r.entitat)+'</b><span>'+r.inici+'–'+r.fi+(totes?' · '+esc(sala(r.sala).nom):'')+'</span></div>'; }
+      const a=it.a, an=!esPunt(a)&&anulada(a,x.dt);
+      return '<div class="ev" data-evact="'+a.id+'" role="button" tabindex="0" style="'+pos+';color:var(--'+a.eix+')'+(an?';opacity:.45;text-decoration:line-through':'')+'" title="'+esc(a.nom+" · "+a.inici+"–"+a.fi+" · "+sala(a.sala).nom+(S.casal==="tots"?" · "+casal(a.casal).curt:"")+" · "+a.inscrits.length+"/"+a.places)+'"><b>'+(esPunt(a)?'★ ':'')+esc(a.nom)+'</b><span class="num">'+a.inici+'–'+a.fi+(an?' · no es fa':'')+'</span>'+(totes?'<span class="evs">'+esc(sala(a.sala).nom)+(S.casal==="tots"?' · '+esc(casal(a.casal).curt):'')+'</span>':'')+'</div>'; }).join("")+'</div>';
   }).join("");
   const reservesLlista=D.reserves.filter(r=>ss.find(s=>s.id===r.sala)).sort((a,b)=>a.dia-b.dia);
   return '<div class="head"><div><h1>Sales i espais</h1><p>Ocupació setmanal i reserves d\'entitats.</p></div><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" id="gestSales">Gestionar espais</button><button class="btn primary" id="novaRes">'+ICON.plus+'Nova reserva</button></div></div>'+
-  '<div class="filters" role="group" aria-label="Sala">'+ss.map(s=>'<button data-sala="'+s.id+'" aria-pressed="'+(S.sala===s.id)+'">'+esc(s.nom)+(S.casal==="tots"?' · '+esc(casal(s.casal).curt):'')+'</button>').join("")+'</div>'+
-  '<div class="legend">'+Object.keys(EIX_C).map(e=>'<span><i style="background:var(--'+e+')"></i>'+EIX_C[e]+'</span>').join("")+'<span><i style="background:repeating-linear-gradient(135deg,var(--muted) 0 2px,transparent 2px 4px)"></i>Reserva externa</span><span>Aforament: '+sl.aforament+' persones</span></div>'+
-  '<p class="note" style="margin:0">Setmana del '+fdata(addDays(isoAvui(),-avuiIdx7()))+'. ★ activitat puntual · ratllat: sessió anul·lada.</p>'+
-  '<div class="tablewrap"><div class="cal"><div class="dh"></div>'+DIES.map((d,i)=>'<div class="dh'+(esAvuiLaborable()&&i===avuiIdx()?' today':'')+'">'+d+' '+fdata(addDays(addDays(isoAvui(),-avuiIdx7()),i))+'</div>').join("")+
-  '<div class="hours">'+Array.from({length:H1-H0},(_,i)=>'<div class="num">'+(H0+i)+':00</div>').join("")+'</div>'+cols+'</div></div>'+
-  '<section class="panel"><div class="panel-h"><h2>Reserves d\'entitats</h2></div><div class="list">'+(reservesLlista.map(r=>'<div class="row"><div class="t"><b>'+esc(r.entitat)+'</b><span>'+esc(r.motiu)+' · '+esc(sala(r.sala).nom)+' · '+DIES[r.dia]+' '+r.inici+'–'+r.fi+'</span></div><button class="btn sm ghost danger" data-delres="'+r.id+'">Anul·lar</button></div>').join("")||'<div class="empty">Cap reserva.</div>')+'</div></section>';
+  '<div class="filters" role="group" aria-label="Sala"><button data-sala="tots" aria-pressed="'+totes+'">Totes les sales</button>'+ss.map(s=>'<button data-sala="'+s.id+'" aria-pressed="'+(S.sala===s.id)+'">'+esc(s.nom)+(S.casal==="tots"?' · '+esc(casal(s.casal).curt):'')+'</button>').join("")+'</div>'+
+  '<div class="legend">'+Object.keys(EIX_C).map(e=>'<span><i style="background:var(--'+e+')"></i>'+EIX_C[e]+'</span>').join("")+'<span><i style="background:repeating-linear-gradient(135deg,var(--muted) 0 2px,transparent 2px 4px)"></i>Reserva externa</span>'+(sl?'<span>Aforament: '+sl.aforament+' persones</span>':'')+'</div>'+
+  '<p class="note" style="margin:0">Setmana del '+fdata(dl)+'. ★ activitat puntual · ratllat: sessió anul·lada. Les activitats que coincideixen surten una al costat de l\'altra; passa el ratolí per sobre per veure-ho tot, o fes-hi clic per obrir la llista.</p>'+
+  '<div class="tablewrap"><div class="cal" style="grid-template-columns:56px '+amples.map(w=>'minmax('+w+'px,'+w+'fr)').join(" ")+';min-width:'+(56+amples.reduce((t,w)=>t+w,0))+'px"><div class="dh"></div>'+visibles.map(x=>'<div class="dh'+(x.di===avuiIdx7()?' today':'')+'">'+x.d+' '+fdata(x.dt)+'</div>').join("")+
+  '<div class="hours">'+Array.from({length:H1-H0},(_,i)=>'<div class="num" style="height:'+PX+'px">'+(H0+i)+':00</div>').join("")+'</div>'+cols.replace(/class="col" style="/g,'class="col" style="background-size:100% '+PX+'px;')+'</div></div>'+
+  '<section class="panel"><div class="panel-h"><h2>Reserves d\'entitats</h2></div><div class="list">'+(reservesLlista.map(r=>'<div class="row"><div class="t"><b>'+esc(r.entitat)+'</b><span>'+esc(r.motiu)+' · '+esc(sala(r.sala).nom)+' · '+DIES7[r.dia]+' '+r.inici+'–'+r.fi+'</span></div><button class="btn sm ghost danger" data-delres="'+r.id+'">Anul·lar</button></div>').join("")||'<div class="empty">Cap reserva.</div>')+'</div></section>';
 };
 
 function gestioSales(){
@@ -1254,6 +1274,7 @@ function formSala(id){
 }
 BIND.sales = () => {
   $("#gestSales").onclick=()=>gestioSales();
+  document.querySelectorAll("[data-evact]").forEach(b=>{ b.onclick=()=>llistaAct(b.dataset.evact); b.onkeydown=e=>{ if(e.key==="Enter") llistaAct(b.dataset.evact); }; });
   document.querySelectorAll("[data-sala]").forEach(b=>b.onclick=()=>{ S.sala=b.dataset.sala; render(); });
   document.querySelectorAll("[data-delres]").forEach(b=>b.onclick=()=>{ const r=D.reserves.find(x=>x.id===b.dataset.delres); D.reserves=D.reserves.filter(x=>x.id!==r.id); logCanvi("Anul·lació de reserva",r.entitat+" · "+DIES[r.dia]+" "+r.inici); save(); toast("Reserva anul·lada."); render(); });
   $("#novaRes").onclick=()=>{
@@ -1261,8 +1282,8 @@ BIND.sales = () => {
     overlay(hdr("Nova reserva","Espais per a entitats")+'<form class="form" id="fr" novalidate>'+
     '<div class="field full"><label for="r_ent">Entitat</label><input id="r_ent" placeholder="Ex.: Associació de veïns"></div>'+
     '<div class="field full"><label for="r_mot">Motiu</label><input id="r_mot" placeholder="Ex.: Reunió de junta"></div>'+
-    '<div class="field"><label for="r_sala">Sala</label><select id="r_sala">'+ss.map(s=>'<option value="'+s.id+'"'+(s.id===S.sala?' selected':'')+'>'+esc(s.nom)+'</option>').join("")+'</select></div>'+
-    '<div class="field"><label for="r_dia">Dia</label><select id="r_dia">'+DIES.map((d,i)=>'<option value="'+i+'">'+d+'</option>').join("")+'</select></div>'+
+    '<div class="field"><label for="r_sala">Sala</label><select id="r_sala">'+ss.map(s=>'<option value="'+s.id+'"'+(s.id===S.sala?' selected':'')+'>'+esc(s.nom)+(S.casal==="tots"?' · '+esc(casal(s.casal).curt):'')+'</option>').join("")+'</select></div>'+
+    '<div class="field"><label for="r_dia">Dia</label><select id="r_dia">'+DIES7.map((d,i)=>'<option value="'+i+'">'+d+'</option>').join("")+'</select></div>'+
     '<div class="field"><label for="r_ini">Inici</label><input id="r_ini" type="time" value="18:00" step="900"></div>'+
     '<div class="field"><label for="r_fi">Fi</label><input id="r_fi" type="time" value="19:30" step="900"></div>'+
     '<div class="full alert" id="rerr" hidden></div><div class="m-f full"><button type="button" class="btn ghost" data-close>Cancel·lar</button><button class="btn primary" type="submit">Reservar</button></div></form>');
