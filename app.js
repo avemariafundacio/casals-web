@@ -437,7 +437,7 @@ const RULES=[
   ["#gestSales","espais","C","h"],["#novaSala","espais","E","h"],["[data-eds]","espais","M","h"],["#delSala","espais","B","h"],
   ["#novaRes","reserves","E","h"],["[data-delres]","reserves","M","h"],
   ["#novaComanda","comandes","E","h"],["#nouProv,#nouProdC","proveidors","E","h"],["[data-eprov],[data-eprod],#edAdr","proveidors","M","h"],
-  ["#nouCom","apats","E","h"],["[data-vin],[data-pag],[data-anl]","apats","M","d"],["#edMenu","menu","M","h"],
+  ["#nouCom","apats","E","h"],["[data-vin],[data-pag],[data-anl],[data-aped]","apats","M","d"],["#edMenu","menu","M","h"],
   ["#novaInc,[data-reav]","incidencies","E","h"],["[data-ist]","incidencies","M","h"],["[data-delinc]","incidencies","B","h"],["#cfgAvis","config","M","h"],
   ["[data-nt]","neteja","E","d"],["#nouInv","inventari","E","h"],["[data-pvok]","inventari","M","h"],
   ["#rbPend","rebuts","C","h"],["[data-rbok]","rebuts","M","h"],["[data-tmes]","mes","E","h"],["[data-rmes]","mes","M","h"],
@@ -1876,7 +1876,7 @@ VIEWS.apats = () => {
   '<div class="filters" role="group" aria-label="Dia">'+DIES7.map((x,i)=>'<button data-ad="'+i+'" aria-pressed="'+(d===i)+'">'+x+(i===avuiIdx7()?' · avui':'')+'</button>').join("")+'</div>'+
   '<div class="minikpis"><div><small>Comensals</small><b class="num">'+rs.length+' / '+A.places+'</b></div><div><small>Han vingut</small><b class="num">'+vin+'</b></div><div><small>No inscrits pagats</small><b class="num">'+pag.length+' de '+ext.length+'</b></div><div><small>Cobrat avui (no inscrits)</small><b class="num">'+eur(rec)+'</b></div></div>'+
   '<div class="grid2"><section class="panel"><div class="panel-h"><h2>Comensals de '+DIES7[d].toLowerCase()+'</h2><span class="chip">'+(A.places-rs.length)+' places lliures</span></div><div class="list">'+
-  (rs.map(r=>{ const s0=r.soci&&soci(r.soci), cb=r.soci&&A.cobraments[mes+"|"+r.soci]; return '<div class="row" style="flex-wrap:wrap"><div class="t" style="min-width:200px"><b>'+esc(apNom(r))+'</b><span>'+(r.soci?(esBonif(r.soci)?'Bonificada SS · paga '+eur(apPreuUsuari(r.soci))+' (Ajuntament '+eur(A.preuServei-apPreuUsuari(r.soci))+')':'Inscrita · '+eur(A.preuServei))+(s0&&!s0.apNorm?' · <button class="chip warn" data-norm="'+r.soci+'" title="Marcar que ha signat la normativa">Falta signar la normativa</button>':'')+' · '+(cb?'<span class="chip good">Mes pagat</span>':'<span class="chip">Mes pendent</span>'):'No inscrita · '+(r.mig?'mig menú ':'menú ')+eur(apPreu(r)))+(r.dieta?' · <span class="chip warn">'+esc(r.dieta)+'</span>':'')+'</span></div><div style="display:flex;gap:6px"><button class="tog" data-vin="'+r.id+'" aria-pressed="'+r.vingut+'">'+(r.vingut?'Ha vingut':'Marcar arribada')+'</button>'+(r.soci?'':'<button class="tog" data-pag="'+r.id+'" aria-pressed="'+r.pagat+'">'+(r.pagat?'Pagat':'Pendent')+'</button>')+'<button class="btn sm ghost danger" data-anl="'+r.id+'" aria-label="Anul·lar">'+ICON.x+'</button></div></div>'; }).join("")||'<div class="empty">Encara no hi ha reserves.</div>')+
+  (rs.map(r=>{ const s0=r.soci&&soci(r.soci), cb=r.soci&&A.cobraments[mes+"|"+r.soci]; return '<div class="row" style="flex-wrap:wrap"><div class="t" style="min-width:200px"><b>'+esc(apNom(r))+'</b><span>'+(r.soci?(esBonif(r.soci)?'Bonificada SS · paga '+eur(apPreuUsuari(r.soci))+' (Ajuntament '+eur(A.preuServei-apPreuUsuari(r.soci))+')':'Inscrita · '+eur(A.preuServei))+(s0&&!s0.apNorm?' · <button class="chip warn" data-norm="'+r.soci+'" title="Marcar que ha signat la normativa">Falta signar la normativa</button>':'')+' · '+(cb?'<span class="chip good">Mes pagat</span>':'<span class="chip">Mes pendent</span>'):'No inscrita · '+(r.mig?'mig menú ':'menú ')+eur(apPreu(r)))+(r.dieta?' · <span class="chip warn">'+esc(r.dieta)+'</span>':'')+'</span></div><div style="display:flex;gap:6px"><button class="tog" data-vin="'+r.id+'" aria-pressed="'+r.vingut+'">'+(r.vingut?'Ha vingut':'Marcar arribada')+'</button>'+(r.soci?'':'<button class="tog" data-pag="'+r.id+'" aria-pressed="'+r.pagat+'">'+(r.pagat?'Pagat':'Pendent')+'</button>')+'<button class="btn sm ghost" data-aped="'+r.id+'" aria-label="Editar '+esc(apNom(r))+'">Editar</button><button class="btn sm ghost danger" data-anl="'+r.id+'" aria-label="Anul·lar">'+ICON.x+'</button></div></div>'; }).join("")||'<div class="empty">Encara no hi ha reserves.</div>')+
   '</div></section><section class="panel"><div class="panel-h"><h2>Menú del dia</h2><button class="btn sm" id="edMenu">Editar</button></div><div class="menu"><div><small>Primer</small><b>'+esc(m.primer)+'</b></div><div><small>Segon</small><b>'+esc(m.segon)+'</b></div><div><small>Postres</small><b>'+esc(m.postres)+'</b></div></div>'+
   '<div class="note">Per a cuina: '+rs.length+' racions'+(rs.some(r=>r.dieta)?', de les quals '+Object.entries(rs.filter(r=>r.dieta).reduce((o,r)=>(o[r.dieta]=(o[r.dieta]||0)+1,o),{})).map(([k,v])=>v+' '+k.toLowerCase()).join(', '):'')+'.</div>'+
   '<div class="section-t">La setmana</div><div class="list">'+A.menus.map((mm,i)=>{ const n=A.reserves.filter(r=>r.dia===i).length; return '<div class="row"><div class="t"><b>'+DIES7[i]+'</b><span>'+esc(mm.segon)+'</span></div><span class="num">'+n+' / '+A.places+'</span></div>'; }).join("")+'</div>'+
@@ -1891,6 +1891,7 @@ BIND.apats = () => {
   const f=(k,id)=>A.reserves.find(r=>r.id===id);
   document.querySelectorAll("[data-vin]").forEach(b=>b.onclick=()=>{ const r=f(0,b.dataset.vin); r.vingut=!r.vingut; save(); render(); });
   document.querySelectorAll("[data-pag]").forEach(b=>b.onclick=()=>{ const r=f(0,b.dataset.pag); r.pagat=!r.pagat; save(); if(r.pagat) toast("Cobrat "+eur(apPreu(r))+" a "+apNom(r)+"."); render(); });
+  document.querySelectorAll("[data-aped]").forEach(b=>b.onclick=()=>{ const r=f(0,b.dataset.aped); if(r.soci) fitxaComensal(r.soci); else fitxaNoInscrita(r); });
   document.querySelectorAll("[data-anl]").forEach(b=>b.onclick=()=>{ const r=f(0,b.dataset.anl);
     const fer=()=>{ A.reserves=A.reserves.filter(x=>x.id!==r.id); if(r.soci) logCanvi("Baixa de dinar",apNom(r)+" · "+DIES7[r.dia]); save(); toast("Reserva anul·lada."); render(); };
     if(r.soci) confirmar("Anul·lar el dinar de "+DIES7[r.dia].toLowerCase(),"Cal avisar amb 5 dies d'antelació. Si no s'ha respectat el termini, s'han d'abonar els menús ja elaborats (normativa, punt 8).","Anul·lar",fer); else fer(); });
@@ -1902,25 +1903,65 @@ BIND.apats = () => {
   };
   $("#nouCom").onclick=()=>comensalModal("");
 };
+const DIETES_AP=["Sense sal","Triturat","Sense gluten","Diabètic","Hipocalòrica","Vegetarià"];
+const dietaCamp = v => { const altra=!!v&&!DIETES_AP.includes(v);
+  return '<div class="field full"><label for="c_dieta">Tipus de menú (dieta)</label><div style="display:flex;gap:8px;flex-wrap:wrap"><select id="c_dieta" style="min-width:200px"><option value="">Menú genèric</option>'+DIETES_AP.map(x=>'<option'+(v===x?' selected':'')+'>'+x+'</option>').join("")+'<option value="__altra"'+(altra?' selected':'')+'>Una altra…</option></select><input id="c_dieta2" placeholder="Quina dieta?" value="'+esc(altra?v:"")+'"'+(altra?'':' hidden')+' style="flex:1;min-width:160px"></div><p class="note" style="margin:6px 0 0">Els menús adaptats necessiten informe mèdic (normativa, punt 4). És una dada de salut: escriu només el tipus de menú.</p></div>'; };
+const dietaLlegir = () => { const v=$("#c_dieta").value; return v==="__altra" ? ($("#c_dieta2").value.trim().slice(0,60)) : v; };
+const dietaLligar = () => { const sel=$("#c_dieta"); sel.onchange=()=>{ $("#c_dieta2").hidden=sel.value!=="__altra"; if(sel.value==="__altra") $("#c_dieta2").focus(); }; };
+/* Pas 1: triar la persona (o afegir-ne una de no inscrita) */
 function comensalModal(q){
-  const A=D.apats, d=apDia(), rs=A.reserves.filter(r=>r.dia===d);
-  if(rs.length>=A.places){ toast("El menjador és ple per a "+DIES7[d].toLowerCase()+"."); return; }
-  const cand=D.socis.filter(s=>s.casal==="c2" && !rs.find(r=>r.soci===s.id) && (!q||nomComplet(s).toLowerCase().includes(q.toLowerCase())));
-  overlay(hdr("Afegir comensal", DIES7[d]+" · "+(A.places-rs.length)+" places lliures")+
-  '<div class="field"><label for="c_dieta">Indicació de dieta (opcional)</label><select id="c_dieta"><option value="">Cap</option><option>Sense sal</option><option>Triturat</option><option>Sense gluten</option><option>Diabètic</option><option>Vegetarià</option></select></div>'+
-  '<label class="search">'+ICON.search+'<input id="qc" type="search" placeholder="Cerca persona de Roquetes" value="'+esc(q)+'" aria-label="Cerca soci"></label><div class="list">'+
-  (cand.map(s=>'<div class="row"><div class="who" style="flex:1"><span class="avatar">'+inicials(s)+'</span><div>'+esc(nomComplet(s))+'<small>Núm. '+s.num+'</small></div></div><button class="btn sm primary" data-cs="'+s.id+'">Afegir</button></div>').join("")||'<div class="empty">Cap soci disponible amb aquesta cerca.</div>')+'</div>'+
-  '<div class="section-t">Persona no inscrita al servei (paga el preu del bar)</div><form id="fns" style="display:flex;gap:8px;flex-wrap:wrap" novalidate><input id="c_nom" class="select" style="flex:1;min-width:180px;background:var(--surface)" placeholder="Nom i cognoms" aria-label="Nom de la persona no inscrita"><select id="c_mig" class="select" aria-label="Tipus de menú"><option value="0">Menú complet · '+eur(apCfg().preuMenu)+'</option><option value="1">Mig menú · '+eur(apCfg().preuMig)+'</option></select><button class="btn" type="submit">Afegir</button></form>');
-  const qc=$("#qc"); qc.oninput=()=>{ const p=qc.selectionStart, dv=$("#c_dieta").value; comensalModal(qc.value); $("#c_dieta").value=dv; const n=$("#qc"); n.focus(); n.setSelectionRange(p,p); };
-  const add=(sid,nom,mig,dieta)=>{ A.reserves.push(Object.assign({id:uid("m"),dia:d,soci:sid,nom:nom||"",pagat:false,vingut:false,dieta:dieta||"",subv:esBonif(sid)},sid?{}:{mig:!!mig})); save(); closeOverlay(); toast((sid?soci(sid).nom:nom)+" té dinar reservat."); render(); };
-  document.querySelectorAll("[data-cs]").forEach(b=>b.onclick=()=>{ const s=soci(b.dataset.cs), dieta=$("#c_dieta").value;
-    if(s.apNorm||A.reserves.some(r=>r.soci===s.id)) return add(s.id,"",false,dieta);
-    overlay(hdr("Inscripció al servei d'àpats",nomComplet(s))+'<p style="margin:0">Primer dinar de '+esc(s.nom)+' al servei. Cal que signi la normativa (Annex IV): preu '+eur(apPreuUsuari(s.id))+', pagament mensual i per avançat, avisar de les baixes amb 5 dies d\'antelació.</p>'+
-    '<button class="btn sm" id="nrVeure" style="align-self:flex-start">Veure la normativa</button><label class="check"><input type="checkbox" id="nrOk">Ha signat l\'imprès d\'acceptació de la normativa</label><div class="alert" id="nrErr" hidden>Cal la signatura de la normativa per inscriure\'s al servei.</div>'+
-    '<div class="m-f"><button class="btn ghost" data-close>Cancel·lar</button><button class="btn primary" id="nrSi">Inscriure i reservar</button></div>');
-    $("#nrVeure").onclick=()=>{ veureNormativa(); };
-    $("#nrSi").onclick=()=>{ if(!$("#nrOk").checked){ $("#nrErr").hidden=false; return; } s.apNorm=isoAvui(); logCanvi("Normativa d'àpats signada",nomComplet(s)); add(s.id,"",false,dieta); }; });
-  $("#fns").onsubmit=e=>{ e.preventDefault(); const n=$("#c_nom").value.trim(); if(!n){ $("#c_nom").focus(); return; } add(null,n+" (no inscrita)",$("#c_mig").value==="1",$("#c_dieta").value); };
+  const A=apCfg(); q=q||"";
+  const cand=D.socis.filter(s=>s.casal==="c2" && !s.baixa && (!q||nomComplet(s).toLowerCase().includes(q.toLowerCase()))).sort((a,b)=>nomComplet(a).localeCompare(nomComplet(b)));
+  const te=sid=>A.reserves.some(r=>r.soci===sid);
+  overlay(hdr("Afegir comensal","Àpats en companyia · Roquetes")+
+  '<label class="search">'+ICON.search+'<input id="qc" type="search" placeholder="Cerca persona de Roquetes" value="'+esc(q)+'" aria-label="Cerca persona"></label><div class="list">'+
+  (cand.slice(0,40).map(s=>'<div class="row"><div class="who" style="flex:1"><span class="avatar">'+inicials(s)+'</span><div>'+esc(nomComplet(s))+'<small>Núm. '+s.num+(te(s.id)?' · ja dina '+diesDe(s.id):'')+'</small></div></div><button class="btn sm '+(te(s.id)?'':'primary')+'" data-cs="'+s.id+'">'+(te(s.id)?'Editar':'Afegir')+'</button></div>').join("")||'<div class="empty">Cap persona amb aquesta cerca.</div>')+'</div>'+
+  '<div class="section-t">Persona no inscrita al servei (paga el preu del bar) · '+DIES7[apDia()].toLowerCase()+'</div><form id="fns" style="display:flex;gap:8px;flex-wrap:wrap" novalidate><input id="c_nom" class="select" style="flex:1;min-width:180px;background:var(--surface)" placeholder="Nom i cognoms" aria-label="Nom de la persona no inscrita"><select id="c_mig" class="select" aria-label="Tipus de menú"><option value="0">Menú complet · '+eur(A.preuMenu)+'</option><option value="1">Mig menú · '+eur(A.preuMig)+'</option></select><button class="btn" type="submit">Afegir</button></form>');
+  const qc=$("#qc"); qc.oninput=()=>{ const p=qc.selectionStart; comensalModal(qc.value); const n=$("#qc"); n.focus(); n.setSelectionRange(p,p); };
+  document.querySelectorAll("[data-cs]").forEach(b=>b.onclick=()=>fitxaComensal(b.dataset.cs));
+  $("#fns").onsubmit=e=>{ e.preventDefault(); const n=$("#c_nom").value.trim(); if(!n){ $("#c_nom").focus(); return; } const d=apDia();
+    if(A.reserves.filter(r=>r.dia===d).length>=A.places){ toast("El menjador és ple per a "+DIES7[d].toLowerCase()+"."); return; }
+    A.reserves.push({id:uid("m"),dia:d,soci:null,nom:n+" (no inscrita)",pagat:false,vingut:false,dieta:"",subv:false,mig:$("#c_mig").value==="1"}); save(); closeOverlay(); toast(n+" té dinar reservat."); render(); };
+}
+const diesDe = sid => diesTxt(D.apats.reserves.filter(r=>r.soci===sid).map(r=>r.dia).sort((a,b)=>a-b).map((x,i)=>i?DIES7[x].toLowerCase():DIES7[x]));
+/* Pas 2: dies que ve, dieta i normativa (alta i edició) */
+function fitxaComensal(sid){
+  const A=apCfg(), s=soci(sid), meves=A.reserves.filter(r=>r.soci===sid), nou=!meves.length;
+  const dies0=nou?[apDia()]:meves.map(r=>r.dia), dieta0=(meves.find(r=>r.dieta)||{}).dieta||"";
+  const ocup=d=>A.reserves.filter(r=>r.dia===d&&r.soci!==sid).length;
+  const calNorm=!s.apNorm;
+  overlay(hdr(nou?"Afegir comensal":"Editar comensal",nomComplet(s))+'<form class="form" id="fcm" novalidate>'+
+  '<div class="field full"><label>Dies que dinarà cada setmana</label><div class="filters" role="group" aria-label="Dies" style="margin:0">'+DIES7.map((d,i)=>'<button type="button" data-cd="'+i+'" aria-pressed="'+dies0.includes(i)+'"'+(ocup(i)>=A.places&&!dies0.includes(i)?' disabled title="Ple"':'')+'>'+d+' <small class="num">'+ocup(i)+'/'+A.places+'</small></button>').join("")+'</div></div>'+
+  dietaCamp(dieta0)+
+  '<div class="full note" style="margin:0">Preu: '+eur(apPreuUsuari(sid))+(esBonif(sid)?' (bonificada per Serveis Socials; l\'Ajuntament paga '+eur(A.preuServei-apPreuUsuari(sid))+')':'')+' per dinar · pagament mensual i per avançat.</div>'+
+  (calNorm?'<div class="full" style="display:flex;flex-direction:column;gap:8px;border:1px solid var(--line);border-radius:12px;padding:12px"><b>Normativa del servei (Annex IV)</b><details><summary style="cursor:pointer">Veure la normativa</summary><ol style="margin:8px 0 0;padding-left:22px;display:flex;flex-direction:column;gap:6px">'+NORMATIVA_APATS.map(t=>'<li>'+esc(t)+'</li>').join("")+'</ol></details><label class="check"><input type="checkbox" id="nrOk">Ha signat l\'imprès d\'acceptació de la normativa</label></div>':'<div class="full note" style="margin:0">Normativa signada el '+fdata(s.apNorm)+'.</div>')+
+  '<div class="full note" id="cmBaixa" hidden style="margin:0">Treus algun dia: recorda que cal avisar amb 5 dies d\'antelació; si no, s\'han d\'abonar els menús ja elaborats (normativa, punt 8).</div>'+
+  '<div class="full alert" id="cmErr" hidden></div><div class="m-f full">'+(nou?'':'<button type="button" class="btn danger" id="cmTreu" style="margin-right:auto">Treure del servei</button>')+'<button type="button" class="btn ghost" data-close>Cancel·lar</button><button class="btn primary" type="submit">'+(nou?'Inscriure i reservar':'Desar')+'</button></div></form>');
+  dietaLligar();
+  const sel=()=>[...document.querySelectorAll("#fcm [data-cd]")].filter(b=>b.getAttribute("aria-pressed")==="true").map(b=>Number(b.dataset.cd));
+  document.querySelectorAll("#fcm [data-cd]").forEach(b=>b.onclick=()=>{ b.setAttribute("aria-pressed", b.getAttribute("aria-pressed")!=="true"); $("#cmBaixa").hidden=!dies0.some(d=>!sel().includes(d))||nou; });
+  const er=t=>{ const x=$("#cmErr"); x.textContent=t; x.hidden=false; };
+  const tr=$("#cmTreu"); if(tr) tr.onclick=()=>confirmar("Treure "+s.nom+" del servei","S'anul·len tots els seus dinars setmanals. Cal avisar amb 5 dies d'antelació; si no, s'han d'abonar els menús ja elaborats (normativa, punt 8).","Treure",()=>{ A.reserves=A.reserves.filter(r=>r.soci!==sid); logCanvi("Baixa del servei d'àpats",nomComplet(s)); save(); toast(s.nom+" ja no té dinars reservats."); render(); });
+  $("#fcm").onsubmit=e=>{ e.preventDefault(); const L=sel(), dieta=dietaLlegir();
+    if(!L.length) return er("Tria almenys un dia. Per donar-la de baixa del servei, fes servir «Treure del servei».");
+    if($("#c_dieta").value==="__altra"&&!dieta) return er("Escriu quina dieta segueix.");
+    if(calNorm&&!$("#nrOk").checked) return er("Cal la signatura de la normativa per inscriure's al servei.");
+    const plens=L.filter(d=>!dies0.includes(d)&&ocup(d)>=A.places); if(plens.length) return er("El menjador és ple el "+plens.map(d=>DIES7[d].toLowerCase()).join(", ")+".");
+    if(calNorm){ s.apNorm=isoAvui(); logCanvi("Normativa d'àpats signada",nomComplet(s)); }
+    const treure=dies0.filter(d=>!L.includes(d));
+    A.reserves=A.reserves.filter(r=>!(r.soci===sid&&treure.includes(r.dia)));
+    L.filter(d=>!meves.some(r=>r.dia===d)).forEach(d=>A.reserves.push({id:uid("m"),dia:d,soci:sid,nom:"",pagat:false,vingut:false,dieta,subv:esBonif(sid)}));
+    A.reserves.forEach(r=>{ if(r.soci===sid) r.dieta=dieta; });
+    logCanvi(nou?"Alta al servei d'àpats":"Canvi al servei d'àpats",nomComplet(s)+" · "+diesDe(sid)+(dieta?" · menú "+dieta:""));
+    save(); closeOverlay(); toast(s.nom+(nou?" dinarà ":": ")+diesDe(sid).toLowerCase()+"."); render(); };
+}
+function fitxaNoInscrita(r){
+  const A=apCfg();
+  overlay(hdr("Editar comensal",r.nom)+'<form class="form" id="fni" novalidate><div class="field full"><label for="ni_nom">Nom</label><input id="ni_nom" value="'+esc(r.nom)+'"></div>'+
+  '<div class="field"><label for="ni_mig">Menú</label><select id="ni_mig"><option value="0">Menú complet · '+eur(A.preuMenu)+'</option><option value="1"'+(r.mig?' selected':'')+'>Mig menú · '+eur(A.preuMig)+'</option></select></div>'+dietaCamp(r.dieta||"")+
+  '<div class="m-f full"><button type="button" class="btn ghost" data-close>Cancel·lar</button><button class="btn primary" type="submit">Desar</button></div></form>');
+  dietaLligar();
+  $("#fni").onsubmit=e=>{ e.preventDefault(); r.nom=$("#ni_nom").value.trim()||r.nom; r.mig=$("#ni_mig").value==="1"; r.dieta=dietaLlegir(); save(); closeOverlay(); toast("Canvis desats."); render(); };
 }
 
 /* ---------- Acollida i seguiment ---------- */
