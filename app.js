@@ -761,14 +761,19 @@ VIEWS.equip = () => {
     (esSup()&&ROLS_PIN.includes(t.rol)?'<span class="chip '+(t.pin?'good':'warn')+'">'+(t.pin?'Té PIN':'Sense PIN')+'</span>':'')+
     (esSup()?'<button class="btn sm" data-eus="'+t.id+'">Editar</button>'+(ROLS_PIN.includes(t.rol)&&t.actiu?'<button class="btn sm" data-pus="'+t.id+'">PIN</button>':'')+(t.rol!=="tauleta"&&!t.sense_correu?'<button class="btn sm ghost" data-rus="'+t.id+'">Enllaç de contrasenya</button>':''):'')+'</div>';
   const persones=(us||[]).filter(t=>t.rol!=="tauleta"), tauletes=(us||[]).filter(t=>t.rol==="tauleta");
+  /* Les baixes (comptes desactivats) queden amagades. Es poden tornar a veure per reactivar-les. */
+  const llista=(arr,clau,buit)=>{ const act=arr.filter(t=>t.actiu), baix=arr.filter(t=>!t.actiu), obert=!!(S.eqBaixes&&S.eqBaixes[clau]);
+    return '<div class="list">'+(act.map(fila).join("")||'<div class="empty">'+buit+'</div>')+'</div>'+
+      (baix.length?'<div style="margin-top:10px"><button class="btn sm ghost" data-eqb="'+clau+'" aria-expanded="'+obert+'">'+(obert?'Amagar les baixes':'Veure les baixes ('+baix.length+')')+'</button></div>'+
+        (obert?'<div class="list" style="margin-top:8px;opacity:.6">'+baix.map(fila).join("")+'</div>':''):''); };
   return '<div class="head"><div><h1>Equip i accessos</h1><p>'+(us?persones.filter(t=>t.actiu).length+' persones amb accés':'Carregant…')+'</p></div></div>'+
     '<section class="panel"><div class="panel-h"><div><h2>Fitxatges, vacances i permisos</h2><p style="margin:2px 0 0;color:var(--muted);font-size:14px">Es gestionen a Kelio, el programa de RR.HH. de la Fundació. S\'obre en una pestanya nova.</p></div><a class="btn kelio-b" href="'+KELIO+'" target="_blank" rel="noopener noreferrer" data-kelio>'+ICON.clock+'Obrir Kelio</a></div></section>'+
     (esSup()&&(S._sol||[]).length?'<section class="panel" style="border:2px solid var(--accent)"><div class="panel-h"><div><h2>Sol·licituds d\'accés des de les tauletes</h2><p style="margin:2px 0 0;color:var(--muted);font-size:14px">Persones sense correu de la Fundació. En validar-les, tries el perfil i el PIN. Només podran entrar amb PIN a la tauleta.</p></div></div><div class="list">'+
       S._sol.map(x=>'<div class="row" style="flex-wrap:wrap"><div class="t" style="min-width:220px"><b>'+esc(x.nom+" "+x.cognoms)+'</b><span>'+esc((POSICIONS.find(p=>p[0]===x.posicio)||["",x.posicio])[1])+' · '+esc(casalT({casal:x.casal}))+' · '+fdata(String(x.creat).slice(0,10))+'</span></div><button class="btn sm primary" data-slok="'+x.id+'">Validar i posar PIN</button><button class="btn sm ghost danger" data-slno="'+x.id+'">Rebutjar</button></div>').join("")+'</div></section>':'')+
     '<section class="panel"><div class="panel-h"><h2>Persones amb accés al programa</h2>'+(esSup()?'<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" id="nouSC">'+ICON.plus+'Persona sense correu</button><button class="btn sm primary" id="nouUs">'+ICON.plus+'Nova persona</button></div>':'')+'</div>'+
     (esSup()?'':'<p class="note" style="margin:0">Només la Direcció General (Supervisió) dona d\'alta i de baixa usuaris i canvia perfils i PIN.</p>')+
-    '<div class="list">'+(persones.map(fila).join("")||'<div class="empty">'+(us?'Encara no hi ha ningú.':'Carregant…')+'</div>')+'</div></section>'+
-    (esSup()?'<section class="panel"><div class="panel-h"><div><h2>Tauletes dels casals</h2><p style="margin:2px 0 0;color:var(--muted);font-size:14px">Compte del dispositiu de cada casal. Hi entren amb PIN Animació, Informació, Neteja, talleristes i voluntariat.</p></div><button class="btn sm" id="nouTau">'+ICON.plus+'Nova tauleta</button></div><div class="list">'+(tauletes.map(fila).join("")||'<div class="empty">Cap tauleta configurada.</div>')+'</div></section>':'');
+    llista(persones,"p",us?'Encara no hi ha ningú.':'Carregant…')+'</section>'+
+    (esSup()?'<section class="panel"><div class="panel-h"><div><h2>Tauletes dels casals</h2><p style="margin:2px 0 0;color:var(--muted);font-size:14px">Compte del dispositiu de cada casal. Hi entren amb PIN Animació, Informació, Neteja, talleristes i voluntariat.</p></div><button class="btn sm" id="nouTau">'+ICON.plus+'Nova tauleta</button></div>'+llista(tauletes,"t","Cap tauleta activa.")+'</section>':'');
 };
 function formUsuari(id){
   const t=id?treb(id):{nom:"",email:"",rol:"informador",casal:S.casal==="tots"?"c1":S.casal,actiu:true};
@@ -838,6 +843,7 @@ BIND.equip = () => {
   const nu=$("#nouUs"); if(nu) nu.onclick=()=>formUsuari();
   const nt=$("#nouTau"); if(nt) nt.onclick=()=>formTauleta();
   const sc=$("#nouSC"); if(sc) sc.onclick=()=>formSenseCorreu(null);
+  document.querySelectorAll("[data-eqb]").forEach(b=>b.onclick=()=>{ S.eqBaixes=S.eqBaixes||{}; S.eqBaixes[b.dataset.eqb]=!S.eqBaixes[b.dataset.eqb]; render(); });
   document.querySelectorAll("[data-slok]").forEach(b=>b.onclick=()=>formSenseCorreu((S._sol||[]).find(x=>x.id===b.dataset.slok)));
   document.querySelectorAll("[data-slno]").forEach(b=>b.onclick=()=>{ const x=(S._sol||[]).find(y=>y.id===b.dataset.slno); confirmMotiu("Rebutjar la sol·licitud de "+x.nom,"La persona no tindrà accés al programa.","Rebutjar",async m=>{ try{ await fn("usuaris",{accio:"rebutjar",id:x.id,motiu:m}); toast("Sol·licitud rebutjada."); carregarUsuaris(); }catch(e){ toast(e.message); } }); });
   document.querySelectorAll("[data-eus]").forEach(b=>b.onclick=()=>formUsuari(b.dataset.eus));
