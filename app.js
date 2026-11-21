@@ -30,7 +30,8 @@ const ICON = {
   search:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>',
   ext:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6"/><path d="M20 4l-9 9"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>',
   cart:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="20" r="1.4"/><circle cx="18" cy="20" r="1.4"/><path d="M2.5 3.5h3l2.4 11.2a1.5 1.5 0 0 0 1.5 1.2h8.4a1.5 1.5 0 0 0 1.5-1.1L21 8H6.6"/></svg>',
-  x:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>'
+  x:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>',
+  euro:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6.5A7 7 0 1 0 18 17.5"/><path d="M4 10h9M4 14h9"/></svg>'
 };
 
 /* ---------- Dates ---------- */
@@ -56,7 +57,7 @@ function buit(){
     apats:{places:30,preuSoci:6.5,preuNoSoci:8.5,preuSubv:3,subvencionats:[],cobraments:{},hora:"13:00",menus:Array.from({length:7},()=>({primer:"",segon:"",postres:""})),reserves:[],historic:[]},
     assist:{},arribades:{},rebuts:[],seguiments:[],derivacions:[],
     manteniment:{incidencies:[],inventari:[],preventiu:[],tasques:[],neteja:{}},
-    config:{avisos:{actiu:true,destinataris:[]}},registre:[],mesosTancats:{},informes:{},
+    config:{avisos:{actiu:true,destinataris:[]}},registre:[],mesosTancats:{},informes:{},facturacio:[],carrecs:[],
     compres:{proveidors:[],productes:[],comandes:[],petitoris:{},correu:{mode:"prova",prova:""},codisClient:{},adreces:{}}};
 }
 const casalDe = (arr,id) => { const x=arr.find(y=>y.id===id); return x ? x.casal : undefined; };
@@ -77,7 +78,9 @@ const ARRAYS = {
   "manteniment.tasques":     {get:d=>d.manteniment.tasques, casal:r=>r.casal||null},
   "compres.proveidors":      {get:d=>d.compres.proveidors, casal:()=>null},
   "compres.productes":       {get:d=>d.compres.productes, casal:()=>null},
-  "compres.comandes":        {get:d=>d.compres.comandes, casal:r=>r.casal}
+  "compres.comandes":        {get:d=>d.compres.comandes, casal:r=>r.casal},
+  "facturacio":              {get:d=>d.facturacio, casal:()=>null},
+  "carrecs":                 {get:d=>d.carrecs, casal:r=>r.casal}
 };
 const MAPES = {
   "assist":             {get:d=>d.assist, casal:(k,d)=>casalDe(d.activitats,k.split("|")[0])},
@@ -126,7 +129,7 @@ function toRecords(d){
     put(col, a.id?a.id(r):r.id, a.casal(r,d), data);
   }
   // Dades administratives confidencials (DNI/NIE, compte, representant): col·lecció a part, només Coordinació i Supervisió
-  if(esCoord()) d.socis.forEach(s=>{ if(s.priv&&(s.priv.dni||s.priv.iban||s.priv.repr)) put("socis_privat",s.id,s.casal,s.priv); });
+  if(esCoord()) d.socis.forEach(s=>{ if(s.priv&&(s.priv.dni||s.priv.iban||s.priv.repr||s.priv.titular||s.priv.mandat)) put("socis_privat",s.id,s.casal,s.priv); });
   if(can("seguiment","C")) d.socis.forEach(s=>put("fitxes_socials",s.id,s.casal,{viuSol:!!s.viuSol,acollida:s.acollida}));
   for(const [col,a] of Object.entries(MAPES)) for(const [k,v] of Object.entries(a.get(d))) put(col,k,a.casal(k,d),{k,v});
   if(ROWS.has("config|main")||esCoord()) put("config","main",null,d.config);
@@ -392,6 +395,7 @@ const PERMS=[
   {g:"Justificació",m:"informes",n:"Informes i indicadors",p:{direccio:"C",dinamitzador:"",informador:"",soci:"",ajuntament:"C"},nota:"Ajuntament: informes i llistats nominals. No veu seguiments ni dietes."},
   {g:"Justificació",m:"rebuts",n:"Rebuts d'activitats complementàries",p:{direccio:"CEMB",dinamitzador:"CEM",informador:"CEM",soci:"",ajuntament:"C"}},
   {g:"Justificació",m:"mes",n:"Tancament mensual",p:{direccio:"CEM",dinamitzador:"",informador:"",soci:"",ajuntament:"C"},nota:"Mes tancat = bloquejat. Només Coordinació el reobre, amb motiu."},
+  {g:"Justificació",m:"facturacio",n:"Facturació mensual i fitxer per a comptabilitat",p:{direccio:"CEMB",dinamitzador:"",informador:"",soci:"",ajuntament:""},nota:"Conté NIF i comptes bancaris: només Coordinació i Supervisió. Tancar el mes numera els rebuts i genera l'Excel i el CSV de la remesa. Reobrir demana motiu."},
   {g:"Equip",m:"equip",n:"Equip: usuaris i PIN d'accés al programa",p:{supervisio:"CEMB",direccio:"C",dinamitzador:"C",informador:"",soci:"",ajuntament:""},nota:"Només la Supervisió (Direcció General) dona d'alta i de baixa usuaris del programa i canvia els perfils i els PIN. Els fitxatges, les vacances i els permisos es gestionen a Kelio."},
   {g:"Sistema",m:"inici",n:"Tauler d'inici",p:{direccio:"C",dinamitzador:"C",informador:"C",soci:"",ajuntament:""}},
   {g:"Sistema",m:"config",n:"Rols, avisos i registre de canvis",p:{direccio:"CEMB",dinamitzador:"",informador:"",soci:"",ajuntament:""}}
@@ -428,7 +432,7 @@ const catsPermeses = () => CATS_ROL[S.rol] || Object.keys(CATS_C);
 const PET_CAT={bar:"alimentacio",net:"neteja",far:"farmaciola",tal:"activitats"};
 const can=(m,a)=>{ const r=PM[m]; return !!r && (r.p[S.rol]||"").includes(a); };
 const ABAST={supervisio:"Els dos casals · tot el programa i els usuaris",neteja:"El seu casal · només comandes de neteja",direccio:"Els dos casals",dinamitzador:"El seu casal",informador:"El seu casal",soci:"Només les seves dades",ajuntament:"Els dos casals, només consulta",tallerista:"Només les seves activitats · passar llista",voluntari:"Només les seves activitats · passar llista"};
-const NAVMOD={equip:"equip",inici:"inici",socis:"persones",seguiment:"seguiment",activitats:"activitats",sales:"reserves",comandes:"comandes",apats:"apats",manteniment:"incidencies",informes:"informes",config:"config"};
+const NAVMOD={equip:"equip",inici:"inici",socis:"persones",seguiment:"seguiment",activitats:"activitats",sales:"reserves",comandes:"comandes",apats:"apats",manteniment:"incidencies",informes:"informes",facturacio:"facturacio",config:"config"};
 const RULES=[
   ["#nouSoci,[data-go='socis-nou']","persones","E","h"],["#edSoci","persones","M","h"],["#delSoci","persones","B","h"],["#baixaSoci","persones","M","h"],
   [".sens","seguiment","C","h"],["#fsSeg,#fsDer,[data-sg],[data-dv]","seguiment","E","h"],["#fsAco,[data-ac]","seguiment","M","h"],["[data-dvst]","seguiment","M","d"],
@@ -442,7 +446,8 @@ const RULES=[
   ["[data-nt]","neteja","E","d"],["#nouInv","inventari","E","h"],["[data-pvok]","inventari","M","h"],
   ["#rbPend","rebuts","C","h"],["[data-rbok]","rebuts","M","h"],["[data-tmes]","mes","E","h"],["[data-rmes]","mes","M","h"],
   ["#checkin","arribades","E","h"],["#nouTreb,#nouFix,#fesAdd","equip","E","h"],["[data-etreb],[data-fixed],[data-fixadd]","equip","M","h"],["#absencies","absencies","C","h"],
-  ["#reset","config","B","h"]
+  ["#reset","config","B","h"],
+  ["#fCarNou,#fTanc,[data-fexcl],[data-fajust],[data-fincl],#fReobre","facturacio","M","h"],["[data-fcdel]","facturacio","B","h"],["#fXlsx,#fCsv","facturacio","C","h"]
 ];
 function applyPerms(root){
   RULES.forEach(([sel,m,a,mode])=>{ if(can(m,a)) return; root.querySelectorAll(sel).forEach(el=>{ if(mode==="d"){ el.disabled=true; el.style.cursor="not-allowed"; el.title="El teu perfil només pot consultar"; } else el.hidden=true; }); });
@@ -476,7 +481,7 @@ const LOGO_AM="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAaQAAABkCAYAAADJ00Q
 const ESCUT_AJT="data:image/png;base64,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";
 let NAVL = [];
 const NAV = [
-  {id:"inici",t:"Inici",i:"home"},{id:"socis",t:"Persones",i:"users"},{id:"seguiment",t:"Seguiment",i:"heart"},{id:"activitats",t:"Activitats",i:"act"},{id:"sales",t:"Sales",i:"room"},{id:"comandes",t:"Comandes",i:"cart"},{id:"apats",t:"Àpats",i:"plate"},{id:"manteniment",t:"Manteniment",i:"tool"},{id:"informes",t:"Informes",i:"chart"},{id:"equip",t:"Equip",i:"users"},{id:"config",t:"Rols i permisos",i:"cog"}
+  {id:"inici",t:"Inici",i:"home"},{id:"socis",t:"Persones",i:"users"},{id:"seguiment",t:"Seguiment",i:"heart"},{id:"activitats",t:"Activitats",i:"act"},{id:"sales",t:"Sales",i:"room"},{id:"comandes",t:"Comandes",i:"cart"},{id:"apats",t:"Àpats",i:"plate"},{id:"manteniment",t:"Manteniment",i:"tool"},{id:"informes",t:"Informes",i:"chart"},{id:"facturacio",t:"Facturació",i:"euro"},{id:"equip",t:"Equip",i:"users"},{id:"config",t:"Rols i permisos",i:"cog"}
 ];
 function render(){
   saveUI();
@@ -978,7 +983,7 @@ VIEWS.inici = () => {
   const comPend=D.compres.comandes.filter(inCasal).filter(c=>c.estat==="pendent").length;
   const sub={inici:"",socis:socis.filter(s=>!s.baixa).length+" persones",seguiment:alrt+" alertes",activitats:avui.length+" "+(esAvuiLaborable()?"avui":"el dilluns"),
     sales:D.reserves.filter(r=>D.sales.filter(inCasal).find(x=>x.id===r.sala)).length+" reserves",comandes:comPend?comPend+" per aprovar":"Cap pendent",
-    apats:apAvui===null?"Roquetes":apAvui+" dinars avui",manteniment:incOb+" incidències",informes:MESOS[new Date().getMonth()][0].toUpperCase()+MESOS[new Date().getMonth()].slice(1),config:"Qui pot fer què",equip:trebsVisibles().filter(t=>t.actiu).length+" persones"};
+    apats:apAvui===null?"Roquetes":apAvui+" dinars avui",manteniment:incOb+" incidències",informes:MESOS[new Date().getMonth()][0].toUpperCase()+MESOS[new Date().getMonth()].slice(1),facturacio:(f=>f&&f.estat==="tancada"?"Mes tancat":"Mes obert")((D.facturacio||[]).find(f=>f.id===isoAvui().slice(0,7))),config:"Qui pot fer què",equip:trebsVisibles().filter(t=>t.actiu).length+" persones"};
   const dataLlarga=new Date().toLocaleDateString("ca-ES",{weekday:"long",day:"numeric",month:"long"});
   return '<div class="head hello2"><div><div class="eyebrow">'+esc(dataLlarga)+' · '+esc(nomCasal)+'</div><h1>Bon dia! Què vols fer?</h1></div><button class="btn primary" data-go="socis-nou">'+ICON.plus+'Nova persona</button></div>'+
   '<nav class="tiles" aria-label="Mòduls">'+NAVL.filter(n=>n.id!=="inici").map(n=>'<button class="tile m-'+n.id+'" data-nav="'+n.id+'">'+ICON[n.i]+'<span><b>'+n.t+'</b><small>'+esc(sub[n.id]||"")+'</small></span></button>').join("")+'<a class="tile kelio-t" href="'+KELIO+'" target="_blank" rel="noopener noreferrer" data-kelio>'+ICON.clock+'<span><b>Fitxar i RR.HH.</b><small>Kelio · s\'obre a part</small></span></a></nav>'+
@@ -1041,7 +1046,7 @@ function fitxaSoci(id){
   (!ac.completada?'<div class="sens"><div class="section-t">Acollida</div>'+passosAcollida(s)+'</div>':'')+
   '<div class="sens"><div class="section-t">Seguiments ('+segs.length+')</div><div class="list">'+(segs.slice(0,4).map(g=>'<div class="row"><div class="t"><b>'+esc(g.tipus)+' · '+fdata(g.data)+'</b><span style="white-space:normal">'+esc(g.nota)+'</span></div></div>').join("")||'<div class="empty">Sense seguiments registrats.</div>')+'</div></div>'+
   '<div><div class="section-t">Contacte</div><dl class="dl" style="margin-top:8px"><dt>Telèfon</dt><dd class="num">'+esc(s.tel)+'</dd><dt>Domicili</dt><dd>'+(s.domicili?esc(s.domicili):'—')+'</dd><dt>Correu</dt><dd>'+(s.email?esc(s.email):'—')+'</dd><dt>Persona de referència</dt><dd>'+(s.contacte?esc(s.contacte):'—')+'</dd><dt>Derivat de</dt><dd>'+(s.derivat?esc(s.derivat):'—')+'</dd></dl></div>'+
-  (esCoord()?'<div><div class="section-t">Dades administratives <span class="chip" style="margin-left:6px">Confidencial</span></div><dl class="dl" style="margin-top:8px"><dt>DNI/NIE</dt><dd class="num">'+esc((s.priv&&s.priv.dni)||"—")+'</dd><dt>Compte bancari</dt><dd class="num"><span id="fsIban">'+esc(ibanMask(s.priv&&s.priv.iban))+'</span>'+(s.priv&&s.priv.iban?' <button class="btn sm ghost" id="fsIbanVeure">Mostrar</button>':'')+'</dd><dt>Representant legal</dt><dd>'+esc((s.priv&&s.priv.repr)||"—")+'</dd></dl></div>':'')+
+  (esCoord()?'<div><div class="section-t">Dades administratives <span class="chip" style="margin-left:6px">Confidencial</span></div><dl class="dl" style="margin-top:8px"><dt>DNI/NIE</dt><dd class="num">'+esc((s.priv&&s.priv.dni)||"—")+'</dd><dt>Compte bancari</dt><dd class="num"><span id="fsIban">'+esc(ibanMask(s.priv&&s.priv.iban))+'</span>'+(s.priv&&s.priv.iban?' <button class="btn sm ghost" id="fsIbanVeure">Mostrar</button>':'')+'</dd><dt>Representant legal</dt><dd>'+esc((s.priv&&s.priv.repr)||"—")+'</dd>'+(s.priv&&s.priv.titular?'<dt>Titular del compte</dt><dd>'+esc(s.priv.titular)+'</dd>':'')+'<dt>Mandat SEPA</dt><dd>'+(s.priv&&s.priv.mandat?fdLlarga(s.priv.mandat):'—')+'</dd></dl></div>':'')+
   '<div><div class="section-t">Autoritzacions</div><div style="display:flex;flex-direction:column;gap:8px;margin-top:8px">'+aut.map(a=>'<div style="display:flex;justify-content:space-between"><span>'+a[1]+'</span>'+(s.aut[a[0]]?'<span class="chip good">Signada</span>':'<span class="chip">No</span>')+'</div>').join("")+'</div></div>'+
   (s.obs?'<div><div class="section-t">Observacions per a l\'activitat</div><p class="note" style="margin:8px 0 0">'+esc(s.obs)+'</p></div>':'')+
   '<div><div class="section-t">Activitats ('+acts.length+')</div><div class="list" style="margin-top:4px">'+(acts.length? acts.map(a=>'<div class="row"><div class="t"><b>'+esc(a.nom)+'</b><span>'+horari(a)+'</span></div><button class="btn sm ghost danger" data-baixa="'+a.id+'">Donar de baixa</button></div>').join("") : '<div class="empty">Encara no fa cap activitat.</div>')+
@@ -1067,7 +1072,7 @@ function formSoci(id){
   const f=(k,l,t,full)=>'<div class="field'+(full?' full':'')+'"><label for="f_'+k+'">'+l+'</label><input id="f_'+k+'" type="'+(t||"text")+'" value="'+esc(s[k])+'"></div>';
   overlay(hdr(id?"Editar persona":"Nova persona usuària", id?"Núm. "+s.num:"Alta")+
   '<form class="form" id="fs" novalidate>'+f("nom","Nom")+f("cognoms","Cognoms")+f("naix","Data de naixement","date")+f("tel","Telèfon","tel")+f("domicili","Domicili","text",true)+f("email","Correu (opcional)","email",true)+f("contacte","Persona de referència (opcional)","text",true)+f("derivat","Derivat de (opcional)","text",true)+
-  (esCoord()?'<div class="full section-t" style="margin-top:4px">Dades administratives (confidencials)</div><div class="field"><label for="f_dni">DNI/NIE (opcional)</label><input id="f_dni" value="'+esc((s.priv&&s.priv.dni)||"")+'" autocomplete="off"></div><div class="field"><label for="f_iban">Compte bancari IBAN (opcional)</label><input id="f_iban" value="'+esc(ibanFmt(s.priv&&s.priv.iban))+'" autocomplete="off"></div><div class="field full"><label for="f_repr">Representant legal (opcional)</label><input id="f_repr" value="'+esc((s.priv&&s.priv.repr)||"")+'"></div>':'')+
+  (esCoord()?'<div class="full section-t" style="margin-top:4px">Dades administratives (confidencials)</div><div class="field"><label for="f_dni">DNI/NIE (opcional)</label><input id="f_dni" value="'+esc((s.priv&&s.priv.dni)||"")+'" autocomplete="off"></div><div class="field"><label for="f_iban">Compte bancari IBAN (opcional)</label><input id="f_iban" value="'+esc(ibanFmt(s.priv&&s.priv.iban))+'" autocomplete="off"></div><div class="field full"><label for="f_repr">Representant legal (opcional)</label><input id="f_repr" value="'+esc((s.priv&&s.priv.repr)||"")+'"></div><div class="field"><label for="f_titular">Titular del compte, si no és la persona (opcional)</label><input id="f_titular" maxlength="70" value="'+esc((s.priv&&s.priv.titular)||"")+'" autocomplete="off"></div><div class="field"><label for="f_mandat">Data de signatura de la domiciliació (mandat SEPA)</label><input id="f_mandat" type="date" value="'+esc((s.priv&&s.priv.mandat)||"")+'"></div>':'')+
   '<div class="field"><label for="f_casal">Casal</label><select id="f_casal">'+D.casals.map(c=>'<option value="'+c.id+'"'+(s.casal===c.id?' selected':'')+'>'+esc(c.nom)+'</option>').join("")+'</select></div>'+
   '<label class="check" style="align-self:end;padding-bottom:10px"><input type="checkbox" id="f_entitat"'+(s.entitat?' checked':'')+'>Membre de l\'entitat del casal</label>'+
   '<label class="check full"><input type="checkbox" id="f_viusol"'+(s.viuSol?' checked':'')+'>Viu sol/a <span style="color:var(--muted);font-size:13px">(serveix per detectar solitud; cal ampliar l\'Annex 4)</span></label>'+
@@ -1090,8 +1095,8 @@ function formSoci(id){
     const obj = id ? s : {id:uid("p"), num:Math.max(...D.socis.map(x=>x.num))+1, alta:isoAvui(), acollida:{completada:false,entrevista:null,benvinguda:false,referent:null,revisio:null,interessos:[]}};
     Object.assign(obj,{nom:v("nom"),cognoms:v("cognoms"),naix:v("naix")||"1950-01-01",tel:v("tel"),domicili:v("domicili"),email:v("email"),contacte:v("contacte"),derivat:v("derivat"),casal:v("casal"),entitat:$("#f_entitat").checked,viuSol:$("#f_viusol").checked,obs:v("obs"),
       aut:{imatge:$("#f_a_imatge").checked,dades:$("#f_a_dades").checked,domiciliacio:$("#f_a_domiciliacio").checked}});
-    if($("#f_dni")){ const pv={dni:v("dni").toUpperCase().replace(/[\s-]/g,""),iban:ibanNet(v("iban")),repr:v("repr")}; const ant=JSON.stringify(obj.priv||{});
-      if(pv.dni||pv.iban||pv.repr) obj.priv=pv; else delete obj.priv; if(id&&ant!==JSON.stringify(obj.priv||{})) logCanvi("Canvi de dades administratives",nomComplet(obj)); }
+    if($("#f_dni")){ const pv={dni:v("dni").toUpperCase().replace(/[\s-]/g,""),iban:ibanNet(v("iban")),repr:v("repr")}; if(v("titular")) pv.titular=v("titular"); if(v("mandat")) pv.mandat=v("mandat"); const ant=JSON.stringify(obj.priv||{});
+      if(pv.dni||pv.iban||pv.repr||pv.titular||pv.mandat) obj.priv=pv; else delete obj.priv; if(id&&ant!==JSON.stringify(obj.priv||{})) logCanvi("Canvi de dades administratives",nomComplet(obj)); }
     if(!id) D.socis.unshift(obj); save(); closeOverlay();
     toast(id? "Canvis desats." : obj.nom+" té el núm. "+obj.num+". Comença l'acollida."); if(!id){ S.view="socis"; } render(); if(id) fitxaSoci(id);
   };
@@ -1183,7 +1188,7 @@ function formAct(id){
   (tipus0==="punt"?'':'<div class="field"><label for="a_dini">Comença (opcional)</label><input id="a_dini" type="date" value="'+esc(x.dIni||"")+'"></div><div class="field"><label for="a_dfi">Acaba (opcional)</label><input id="a_dfi" type="date" value="'+esc(x.dFi||"")+'"></div>')+
   (esCoord()?'<div class="field"><label for="a_ptel">Telèfon de qui la fa (opcional)</label><input id="a_ptel" type="tel" value="'+esc(x.profTel||"")+'"></div>':'')+
   (tipus0==="punt"?'<label class="check full"><input type="checkbox" id="a_ext"'+(x.extres?' checked':'')+'>A la llista: autocar, transport adaptat i persona de contacte (sortides i festes)</label>':'')+
-  '<div class="field"><label for="a_preu">Preu (€'+(tipus0==="punt"?'':' / mes')+')</label><input id="a_preu" type="number" min="0" step="0.5" value="'+(x.preu||0)+'"></div>'+
+  '<div class="field"><label for="a_preu">Preu per persona (€'+(tipus0==="punt"?', un sol pagament':' al mes')+')</label><input id="a_preu" type="number" min="0" step="0.01" inputmode="decimal" value="'+(x.preu||0)+'"><small style="color:var(--muted);font-size:12px">0 = gratuïta. '+(tipus0==="punt"?'Es cobra a la facturació del mes de l\'activitat.':'Es cobra cada mes a la facturació.')+'</small></div>'+
   '<div class="field full"><label>Talleristes i voluntariat que passen llista</label>'+(resps.length?'<div style="display:flex;flex-wrap:wrap;gap:10px">'+resps.map(t=>'<label class="check"><input type="checkbox" data-resp="'+t.id+'"'+((x.resp||[]).includes(t.id)?' checked':'')+'>'+esc(nomT(t))+' · '+esc(ROLS[t.rol])+'</label>').join("")+'</div>':'<p class="note" style="margin:0">No hi ha talleristes ni voluntariat donats d\'alta en aquest casal. La Supervisió els dona d\'alta a Equip.</p>')+'</div>'+
   '<div class="full alert" id="aerr" hidden></div><div class="m-f full"><button type="button" class="btn ghost" data-close>Cancel·lar</button><button class="btn primary" type="submit">'+(id?'Desar canvis':'Crear activitat')+'</button></div></form>');
   document.querySelectorAll("[data-atip]").forEach(b=>b.onclick=()=>{ S.actTipus=b.dataset.atip; formAct(); });
@@ -2296,6 +2301,212 @@ function rebutsPendents(){
   const R=dadesInforme(), rb=D.rebuts.filter(r=>R.ms.includes(r.mes)&&!r.pagat);
   overlay(hdr("Rebuts pendents", R.ms.map(nomMes).join(", "))+'<div class="list">'+(rb.map(r=>{ const a=D.activitats.find(x=>x.id===r.act), s=soci(r.soci); if(!a||!s) return ''; const tancat=!!D.mesosTancats[r.mes]; return '<div class="row"><div class="t"><b>'+esc(nomComplet(s))+'</b><span>'+esc(a.nom)+' · '+esc(casal(a.casal).curt)+' · '+nomMes(r.mes)+'</span></div><span class="num">'+eur(r.import)+'</span>'+(tancat?'<span class="chip">Mes tancat</span>':'<button class="btn sm primary" data-rbok="'+r.id+'">Cobrat</button>')+'</div>'; }).join("")||'<div class="empty">Tots els rebuts d\'aquest període estan cobrats.</div>')+'</div>');
   document.querySelectorAll("[data-rbok]").forEach(b=>b.onclick=()=>{ const r=D.rebuts.find(x=>x.id===b.dataset.rbok); r.pagat=true; save(); toast("Rebut cobrat."); render(); rebutsPendents(); });
+}
+
+/* ---------- Facturació mensual: activitats, àpats i altres càrrecs ----------
+   Cada mes es calcula a partir de les dades del programa: activitats amb preu (setmanals: preu al mes; puntuals: preu únic el mes
+   que es fan), àpats en companyia (cobrament mensual per avançat) i altres càrrecs que s'hi afegeixen a mà.
+   Mentre el mes està obert, es pot excloure una línia o canviar-ne l'import (amb motiu). En tancar-lo, es numeren els rebuts,
+   queda una fotografia fixa i es generen els fitxers per a comptabilitat (Excel i CSV de la remesa de domiciliacions).
+   Només Coordinació i Supervisió: el fitxer porta NIF i IBAN (col·lecció confidencial, protegida també al servidor). */
+const TIPUS_F={act:"Activitat",punt:"Activitat puntual",apat:"Àpats",altre:"Altres càrrecs"};
+const CARRECS_T=["Sortida o excursió","Material","Quota","Altres"];
+const facMes = m => (D.facturacio||[]).find(f=>f.id===m);
+const facObre = m => { if(!D.facturacio) D.facturacio=[]; let f=facMes(m); if(!f){ f={id:m,mes:m,estat:"oberta",excl:{},ajust:{}}; D.facturacio.push(f); } f.excl=f.excl||{}; f.ajust=f.ajust||{}; return f; };
+const r2 = v => Math.round((Number(v)||0)*100)/100;
+const domiciliada = s => !!(s&&s.aut&&s.aut.domiciliacio);
+const formaPag = s => domiciliada(s)&&s.priv&&ibanOk(s.priv.iban) ? "dom" : "casal";
+const FORMA_T={dom:"Domiciliació",casal:"Al casal"};
+function mesosFact(){ const ms=mesosContracte(), seg=addDays(ultimDia(isoAvui().slice(0,7)),1).slice(0,7); if(!ms.includes(seg)) ms.push(seg); (D.facturacio||[]).forEach(f=>{ if(!ms.includes(f.mes)) ms.push(f.mes); }); return ms.sort(); }
+function liniesAuto(m){
+  const ini=m+"-01", fi=ultimDia(m), L=[];
+  D.activitats.filter(a=>r2(a.preu)>0).forEach(a=>{
+    const punt=esPunt(a);
+    if(punt ? !(a.data>=ini&&a.data<=fi) : !((!a.dIni||a.dIni<=fi)&&(!a.dFi||a.dFi>=ini))) return;
+    (a.inscrits||[]).forEach(sid=>{ if(!soci(sid)) return;
+      L.push({k:"act|"+a.id+"|"+sid,soci:sid,casal:a.casal,tipus:punt?"punt":"act",ref:a.id,concepte:a.nom+(punt?" ("+fdata(a.data)+")":""),quant:1,preu:r2(a.preu),import:r2(a.preu)}); }); });
+  if(D.apats&&D.apats.reserves&&D.casals.some(c=>c.id==="c2")) cobramentsMes(m).forEach(o=>{ if(!(o.imp>0)||!soci(o.x)) return;
+    L.push({k:"apat|"+o.x,soci:o.x,casal:"c2",tipus:"apat",ref:"apats",concepte:"Àpats en companyia ("+o.n+" dies"+(o.reg?", amb regularització del mes anterior":"")+")",quant:o.n,preu:r2(o.pu),import:r2(o.imp),cobrat:!!(o.c&&o.c.via!=="remesa")}); });
+  (D.carrecs||[]).filter(c=>c.mes===m&&soci(c.soci)).forEach(c=>L.push({k:"car|"+c.id,soci:c.soci,casal:c.casal,tipus:"altre",ref:c.id,concepte:c.concepte,quant:1,preu:r2(c.import),import:r2(c.import)}));
+  return L;
+}
+function liniesMes(m){
+  const f=facMes(m);
+  if(f&&f.estat==="tancada") return f.linies||[];
+  const ex=(f&&f.excl)||{}, aj=(f&&f.ajust)||{};
+  return liniesAuto(m).map(l=>{ const o=Object.assign({},l); if(aj[l.k]){ o.import=r2(aj[l.k].import); o.ajust=aj[l.k]; } if(ex[l.k]) o.exclosa=ex[l.k]; else if(l.cobrat) o.exclosa={motiu:"Ja cobrat al casal (Àpats)",auto:true}; return o; });
+}
+function rebutsDe(L){
+  const per={};
+  L.filter(l=>!l.exclosa&&l.import>0).forEach(l=>{ const s=soci(l.soci); const r=per[l.soci]=per[l.soci]||{soci:l.soci,nom:nomComplet(s),casal:(s&&s.casal)||l.casal,forma:formaPag(s),linies:[],import:0}; r.linies.push(l); r.import=r2(r.import+l.import); });
+  return Object.values(per).sort((a,b)=>a.nom.localeCompare(b.nom,"ca"));
+}
+const conceptRebut = (r,m) => ("Casals Ave Maria · "+nomMes(m)+" · "+[...new Set(r.linies.map(l=>l.tipus==="apat"?"Àpats":l.concepte))].join(", ")).slice(0,140);
+function avisosFact(R){
+  const out=[];
+  R.forEach(r=>{ const s=soci(r.soci); if(!s) return; const p=s.priv||{};
+    if(domiciliada(s)&&!p.iban) out.push([r.nom,"té marcada la domiciliació però no hi ha compte bancari: es cobrarà al casal"]);
+    else if(domiciliada(s)&&!ibanOk(p.iban)) out.push([r.nom,"el compte bancari no és correcte: es cobrarà al casal"]);
+    else if(r.forma==="dom"&&!p.dni) out.push([r.nom,"falta el DNI/NIE (el banc el pot demanar)"]);
+    else if(r.forma==="dom"&&!p.mandat) out.push([r.nom,"falta la data de signatura de l'autorització de domiciliació (mandat SEPA)"]); });
+  return out;
+}
+
+/* Excel (.xlsx) sense biblioteques externes: fulls XML dins un ZIP sense compressió */
+function crc32(b){ const T=crc32.T||(crc32.T=Array.from({length:256},(_,n)=>{ let c=n; for(let k=0;k<8;k++) c=c&1?0xEDB88320^(c>>>1):c>>>1; return c>>>0; })); let c=-1; for(let i=0;i<b.length;i++) c=T[(c^b[i])&255]^(c>>>8); return (c^-1)>>>0; }
+function zipStore(files, type){
+  const enc=new TextEncoder(), parts=[], cen=[]; let off=0;
+  files.forEach(f=>{ const nm=enc.encode(f.name), d=typeof f.data==="string"?enc.encode(f.data):f.data, crc=crc32(d);
+    const h=new DataView(new ArrayBuffer(30)); h.setUint32(0,0x04034b50,true); h.setUint16(4,20,true); h.setUint16(6,0x0800,true); h.setUint16(12,0x21,true); h.setUint32(14,crc,true); h.setUint32(18,d.length,true); h.setUint32(22,d.length,true); h.setUint16(26,nm.length,true);
+    parts.push(new Uint8Array(h.buffer),nm,d);
+    const c=new DataView(new ArrayBuffer(46)); c.setUint32(0,0x02014b50,true); c.setUint16(4,20,true); c.setUint16(6,20,true); c.setUint16(8,0x0800,true); c.setUint16(14,0x21,true); c.setUint32(16,crc,true); c.setUint32(20,d.length,true); c.setUint32(24,d.length,true); c.setUint16(28,nm.length,true); c.setUint32(42,off,true);
+    cen.push(new Uint8Array(c.buffer),nm); off+=30+nm.length+d.length; });
+  const cs=cen.reduce((t,x)=>t+x.length,0), e=new DataView(new ArrayBuffer(22)); e.setUint32(0,0x06054b50,true); e.setUint16(8,files.length,true); e.setUint16(10,files.length,true); e.setUint32(12,cs,true); e.setUint32(16,off,true);
+  return new Blob(parts.concat(cen,[new Uint8Array(e.buffer)]),{type});
+}
+const xmlEsc = s => String(s??"").replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g,"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const colL = i => { let s=""; i++; while(i>0){ const r=(i-1)%26; s=String.fromCharCode(65+r)+s; i=Math.floor((i-1)/26); } return s; };
+/* fulls: [{nom, files:[[...]], amples:[...], num:[índexs de columnes amb imports]}]; la primera fila és la capçalera */
+function xlsxBlob(fulls){
+  const sheet=f=>{ const rows=f.files.map((r,ri)=>'<row r="'+(ri+1)+'">'+r.map((v,ci)=>{ const ref=colL(ci)+(ri+1);
+      if(typeof v==="number"&&isFinite(v)) return '<c r="'+ref+'"'+(ri>0&&(f.num||[]).includes(ci)?' s="2"':'')+'><v>'+v+'</v></c>';
+      if(v===""||v==null) return ''; return '<c r="'+ref+'" t="inlineStr"'+(ri===0?' s="1"':'')+'><is><t xml:space="preserve">'+xmlEsc(v)+'</t></is></c>'; }).join("")+'</row>').join("");
+    return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>'+
+      (f.amples?'<cols>'+f.amples.map((w,i)=>'<col min="'+(i+1)+'" max="'+(i+1)+'" width="'+w+'" customWidth="1"/>').join("")+'</cols>':'')+'<sheetData>'+rows+'</sheetData></worksheet>'; };
+  const files=[
+    {name:"[Content_Types].xml",data:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'+fulls.map((f,i)=>'<Override PartName="/xl/worksheets/sheet'+(i+1)+'.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>').join("")+'</Types>'},
+    {name:"_rels/.rels",data:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'},
+    {name:"xl/workbook.xml",data:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>'+fulls.map((f,i)=>'<sheet name="'+xmlEsc(f.nom.slice(0,31))+'" sheetId="'+(i+1)+'" r:id="rId'+(i+1)+'"/>').join("")+'</sheets></workbook>'},
+    {name:"xl/_rels/workbook.xml.rels",data:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'+fulls.map((f,i)=>'<Relationship Id="rId'+(i+1)+'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet'+(i+1)+'.xml"/>').join("")+'<Relationship Id="rId'+(fulls.length+1)+'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>'},
+    {name:"xl/styles.xml",data:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="3"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/><xf numFmtId="4" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>'}
+  ].concat(fulls.map((f,i)=>({name:"xl/worksheets/sheet"+(i+1)+".xml",data:sheet(f)})));
+  return zipStore(files,"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+}
+async function baixaFitxer(nom, blob){
+  const dl = null;
+  if(dl){ try{ await dl.save({filename:nom,data:blob}); toast("Descarregat: "+nom); return true; }
+    catch(e){ if(e&&e.code==="declined") return false; if(e&&e.code==="rate_limited"){ toast("Ja hi ha una descàrrega pendent."); return false; } } }
+  try{ const u=URL.createObjectURL(blob), a=document.createElement("a"); a.href=u; a.download=nom; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(u),5000); toast("Descarregat: "+nom); return true; }
+  catch(e){ toast("No s'ha pogut descarregar el fitxer."); return false; }
+}
+/* Taules dels fitxers per a comptabilitat (el mes ha d'estar tancat) */
+function taulesFact(m){
+  const f=facMes(m), R=f.rebuts||[], dc=f.tancada.dataCarrec, pv=r=>{ const s=soci(r.soci)||{}; return {s,p:s.priv||{}}; };
+  const rem=[["Núm. rebut","Data de càrrec","Referència del mandat","Data del mandat","NIF/NIE","Titular del compte","IBAN","Import","Concepte","Casal","Persona usuària"]]
+    .concat(R.filter(r=>r.forma==="dom").map(r=>{ const {s,p}=pv(r); return [r.num,dc,"AMF-"+(s.num||r.soci),p.mandat||"",p.dni||"",p.titular||r.nom,ibanNet(p.iban),r.import,r.concepte,casal(r.casal)?casal(r.casal).nom:"",r.nom]; }));
+  const caixa=[["Núm. rebut","Persona usuària","Casal","Telèfon","Import","Concepte","Motiu"]]
+    .concat(R.filter(r=>r.forma!=="dom").map(r=>{ const {s}=pv(r); return [r.num,r.nom,casal(r.casal)?casal(r.casal).nom:"",s.tel||"",r.import,r.concepte,domiciliada(s)?"Falta un compte bancari correcte":"No té la domiciliació autoritzada"]; }));
+  const det=[["Núm. rebut","Persona usuària","Casal","Tipus","Concepte","Quantitat","Preu","Import","Forma de pagament"]];
+  R.forEach(r=>r.linies.forEach(l=>det.push([r.num,r.nom,casal(l.casal)?casal(l.casal).nom:"",TIPUS_F[l.tipus]||l.tipus,l.concepte+(l.ajust?" (import ajustat: "+l.ajust.motiu+")":""),l.quant,l.preu,l.import,FORMA_T[r.forma]])));
+  const sum=t=>r2(R.filter(t).reduce((x,r)=>x+r.import,0));
+  const res=[["Concepte","Valor"],["Mes",nomMes(m)],["Data prevista de càrrec",dc],["Tancat per",f.tancada.per+" · "+f.tancada.data.slice(0,10)],
+    ["Rebuts domiciliats",R.filter(r=>r.forma==="dom").length],["Import domiciliat",sum(r=>r.forma==="dom")],["Rebuts a cobrar al casal",R.filter(r=>r.forma!=="dom").length],["Import a cobrar al casal",sum(r=>r.forma!=="dom")],["Total del mes",sum(()=>true)]]
+    .concat(Object.keys(TIPUS_F).map(t=>["Total "+TIPUS_F[t].toLowerCase(),r2(R.reduce((x,r)=>x+r.linies.filter(l=>l.tipus===t).reduce((y,l)=>y+l.import,0),0))]));
+  return {rem,caixa,det,res};
+}
+async function baixaExcelFact(m){
+  const T=taulesFact(m);
+  const blob=xlsxBlob([{nom:"Resum",files:T.res,amples:[30,30],num:[1]},{nom:"Remesa domiciliacions",files:T.rem,amples:[16,14,18,14,12,30,30,10,60,18,30],num:[7]},
+    {nom:"Cobrar al casal",files:T.caixa,amples:[16,30,18,14,10,60,34],num:[4]},{nom:"Detall per línies",files:T.det,amples:[16,30,18,18,50,10,10,10,16],num:[6,7]}]);
+  logCanvi("Fitxer de facturació descarregat (Excel)",nomMes(m)); save();
+  return baixaFitxer("Facturacio casals "+m+".xlsx",blob);
+}
+async function baixaCsvFact(m){
+  const T=taulesFact(m), rows=T.rem.map((r,i)=>i===0?r:r.map((v,j)=>j===7?n2(v):v));
+  logCanvi("Fitxer de facturació descarregat (CSV remesa)",nomMes(m)); save();
+  return baixaFitxer("Remesa domiciliacions "+m+".csv",new Blob(["﻿"+csv(rows)+"\n"],{type:"text/csv;charset=utf-8"}));
+}
+
+VIEWS.facturacio = () => {
+  const ms=mesosFact(); if(!S.fMes||!ms.includes(S.fMes)) S.fMes=isoAvui().slice(0,7);
+  const m=S.fMes, f=facMes(m), tanc=!!(f&&f.estat==="tancada"), L=liniesMes(m);
+  const R0=tanc?(f.rebuts||[]):rebutsDe(L), vis=r=>S.casal==="tots"||r.casal===S.casal, R=R0.filter(vis);
+  const tot=t=>r2(R.filter(t).reduce((x,r)=>x+r.import,0)), excl=L.filter(l=>l.exclosa&&vis(l));
+  const av=tanc?[]:avisosFact(R);
+  const carr=(D.carrecs||[]).filter(c=>c.mes===m&&vis(c));
+  const fila=(l,r)=>'<div class="fl-l"><span class="chip">'+esc(TIPUS_F[l.tipus])+'</span><span class="t">'+esc(l.concepte)+(l.ajust?' <small style="color:var(--warn)">· ajustat: '+esc(l.ajust.motiu)+'</small>':'')+'</span><b class="num">'+eur(l.import)+'</b>'+
+    (tanc?'':'<span class="fl-a"><button class="btn sm ghost" data-fajust="'+esc(l.k)+'" title="Canviar l\'import">Import</button><button class="btn sm ghost danger" data-fexcl="'+esc(l.k)+'" title="No cobrar aquesta línia aquest mes">Treure</button></span>')+'</div>';
+  return '<div class="head"><div><h1>Facturació</h1><p>Cobrament mensual a les persones usuàries: activitats, àpats i altres càrrecs. En tancar el mes es genera el fitxer per a comptabilitat.</p></div>'+
+    '<div style="display:flex;gap:8px;flex-wrap:wrap">'+(tanc
+      ? '<button class="btn primary" id="fXlsx">'+ICON.ext+'Baixar Excel</button><button class="btn" id="fCsv">Baixar CSV de la remesa</button><button class="btn ghost" id="fReobre">Reobrir</button>'
+      : '<button class="btn" id="fCarNou">'+ICON.plus+'Altre càrrec</button><button class="btn primary" id="fTanc"'+(R0.length?'':' disabled')+'>Tancar el mes i generar el fitxer</button>')+'</div></div>'+
+    '<div class="filters" role="group" aria-label="Mes">'+ms.slice(-8).map(x=>'<button data-fmes="'+x+'" aria-pressed="'+(x===m)+'">'+nomMes(x).replace(/^./,c=>c.toUpperCase())+((facMes(x)&&facMes(x).estat==="tancada")?' ✓':'')+'</button>').join("")+'</div>'+
+    '<div class="pet-band"><div><b>'+(tanc?'Tancat':'Obert (esborrany)')+'</b> · <span>'+(tanc?'el '+fdLlarga(f.tancada.data.slice(0,10))+' per '+esc(f.tancada.per)+' · càrrec previst el '+fdLlarga(f.tancada.dataCarrec):'Les xifres s\'actualitzen soles amb les inscripcions, els àpats i els preus. Revisa-les abans de tancar.')+'</span></div>'+
+      (S.casal!=="tots"?'<span class="chip warn">Només '+esc(casal(S.casal).nom)+'. El tancament inclou els dos casals.</span>':'')+'</div>'+
+    '<section class="kpis fac-kpis">'+kpi("Total del mes",eur(tot(()=>true)),R.length+" rebuts")+kpi("Domiciliació",eur(tot(r=>r.forma==="dom")),R.filter(r=>r.forma==="dom").length+" rebuts al banc")+kpi("Cobrar al casal",eur(tot(r=>r.forma!=="dom")),R.filter(r=>r.forma!=="dom").length+" persones")+kpi("Línies que no es cobren",excl.length,tanc?"":"Es poden tornar a afegir")+'</section>'+
+    (av.length?'<section class="panel"><div class="panel-h"><h2>Revisa abans de tancar</h2><span class="chip warn">'+av.length+'</span></div><div class="list">'+av.map(a=>'<div class="row"><div class="t"><b>'+esc(a[0])+'</b><span>'+esc(a[1])+'</span></div></div>').join("")+'</div><p class="note" style="margin:0">Les dades bancàries es corregeixen a la fitxa de la persona (Persones → Editar → Dades administratives).</p></section>':'')+
+    '<section class="panel"><div class="panel-h"><h2>Rebuts de '+nomMes(m)+'</h2><span class="chip">'+R.length+'</span></div>'+
+      (R.length?'<div class="list">'+R.map(r=>'<div class="row fac-r"><div class="t"><b>'+(r.num?'<span class="num" style="color:var(--muted);font-weight:700">'+esc(r.num)+'</span> · ':'')+esc(r.nom)+'</b><span>'+esc(casal(r.casal)?casal(r.casal).curt:"")+' · <span class="chip '+(r.forma==="dom"?"good":"warn")+'">'+FORMA_T[r.forma]+'</span></span>'+r.linies.map(l=>fila(l,r)).join("")+'</div><b class="num fac-tot">'+eur(r.import)+'</b></div>').join("")+'</div>'
+        :'<div class="empty">Aquest mes no hi ha res a cobrar. Les activitats amb preu, els àpats i els altres càrrecs hi apareixeran sols.</div>')+'</section>'+
+    (excl.length?'<section class="panel"><div class="panel-h"><h2>No es cobren aquest mes</h2></div><div class="list">'+excl.map(l=>'<div class="row"><div class="t"><b>'+esc(nomComplet(soci(l.soci)))+' · '+esc(l.concepte)+'</b><span>'+eur(l.import)+' · '+esc(l.exclosa.motiu||"")+'</span></div>'+(tanc||l.exclosa.auto?'':'<button class="btn sm" data-fincl="'+esc(l.k)+'">Tornar a cobrar</button>')+'</div>').join("")+'</div></section>':'')+
+    (carr.length?'<section class="panel"><div class="panel-h"><h2>Altres càrrecs de '+nomMes(m)+'</h2></div><div class="list">'+carr.map(c=>'<div class="row"><div class="t"><b>'+esc(nomComplet(soci(c.soci)))+'</b><span>'+esc(c.tipus)+' · '+esc(c.concepte)+' · '+eur(c.import)+'</span></div>'+(tanc?'':'<button class="btn sm ghost danger" data-fcdel="'+c.id+'">Esborrar</button>')+'</div>').join("")+'</div></section>':'')+
+    '<p class="note" style="margin:0">Són rebuts de cobrament, no factures fiscals. Les activitats setmanals es cobren pel preu mensual; les puntuals, el mes que es fan; els àpats, per avançat amb la regularització de les absències sense justificar del mes anterior. El fitxer conté NIF i compte bancari: desa\'l a la carpeta de comptabilitat i no l\'enviïs per correu sense protegir.</p>';
+};
+BIND.facturacio = () => {
+  const m=S.fMes;
+  document.querySelectorAll("[data-fmes]").forEach(b=>b.onclick=()=>{ S.fMes=b.dataset.fmes; render(); });
+  const lin=k=>liniesMes(m).find(l=>l.k===k);
+  document.querySelectorAll("[data-fexcl]").forEach(b=>b.onclick=()=>{ const l=lin(b.dataset.fexcl); if(!l) return; confirmMotiu("No cobrar aquesta línia","«"+l.concepte+"» de "+nomComplet(soci(l.soci))+" ("+eur(l.import)+") no es cobrarà a "+nomMes(m)+".","Treure",mo=>{ const f=facObre(m); f.excl[l.k]={motiu:mo,per:quiSoc(),data:araIso()}; logCanvi("Facturació: línia treta",nomMes(m)+" · "+nomComplet(soci(l.soci))+" · "+l.concepte,mo); save(); render(); }); });
+  document.querySelectorAll("[data-fincl]").forEach(b=>b.onclick=()=>{ const f=facObre(m), k=b.dataset.fincl; delete f.excl[k]; logCanvi("Facturació: línia recuperada",nomMes(m)+" · "+k); save(); render(); });
+  document.querySelectorAll("[data-fajust]").forEach(b=>b.onclick=()=>{ const l=lin(b.dataset.fajust); if(!l) return;
+    overlay(hdr("Canviar l'import",nomComplet(soci(l.soci)))+'<form class="form" id="faj" novalidate><p class="full" style="margin:0">'+esc(l.concepte)+' · preu habitual '+eur(l.preu*(l.quant||1))+'</p>'+
+      '<div class="field"><label for="aj_i">Import d\'aquest mes (€)</label><input id="aj_i" type="number" min="0" step="0.01" value="'+l.import+'"></div><div class="field full"><label for="aj_m">Motiu</label><input id="aj_m" placeholder="Ex.: s\'hi ha apuntat a mig mes" value="'+esc((l.ajust&&l.ajust.motiu)||"")+'"></div>'+
+      '<div class="full alert" id="ajerr" hidden></div><div class="m-f full">'+(l.ajust?'<button type="button" class="btn ghost" id="ajDel">Tornar al preu habitual</button>':'')+'<button type="button" class="btn ghost" data-close>Cancel·lar</button><button class="btn primary" type="submit">Desar</button></div></form>');
+    const dl=$("#ajDel"); if(dl) dl.onclick=()=>{ const f=facObre(m); delete f.ajust[l.k]; logCanvi("Facturació: import restablert",nomMes(m)+" · "+nomComplet(soci(l.soci))+" · "+l.concepte); save(); closeOverlay(); render(); };
+    $("#faj").onsubmit=e=>{ e.preventDefault(); const v=Number($("#aj_i").value), mo=$("#aj_m").value.trim(), er=$("#ajerr");
+      if(!(v>=0)||v>9999){ er.textContent="Escriu un import correcte."; er.hidden=false; return; } if(mo.length<4){ er.textContent="Explica breument el motiu."; er.hidden=false; return; }
+      const f=facObre(m); f.ajust[l.k]={import:r2(v),motiu:mo,per:quiSoc(),data:araIso()}; logCanvi("Facturació: import canviat",nomMes(m)+" · "+nomComplet(soci(l.soci))+" · "+l.concepte+": "+eur(v),mo); save(); closeOverlay(); render(); }; });
+  document.querySelectorAll("[data-fcdel]").forEach(b=>b.onclick=()=>{ const c=(D.carrecs||[]).find(x=>x.id===b.dataset.fcdel); if(!c) return; confirmar("Esborrar el càrrec","«"+c.concepte+"» ("+eur(c.import)+") de "+nomComplet(soci(c.soci))+".","Esborrar",()=>{ D.carrecs=D.carrecs.filter(x=>x.id!==c.id); logCanvi("Facturació: càrrec esborrat",nomMes(c.mes)+" · "+nomComplet(soci(c.soci))+" · "+c.concepte+" · "+eur(c.import)); save(); render(); }); });
+  const cn=$("#fCarNou"); if(cn) cn.onclick=()=>formCarrec(m);
+  const tc=$("#fTanc"); if(tc) tc.onclick=()=>tancarFact(m);
+  const xb=$("#fXlsx"); if(xb) xb.onclick=async()=>{ xb.disabled=true; await baixaExcelFact(m); xb.disabled=false; };
+  const cb=$("#fCsv"); if(cb) cb.onclick=async()=>{ cb.disabled=true; await baixaCsvFact(m); cb.disabled=false; };
+  const ro=$("#fReobre"); if(ro) ro.onclick=()=>confirmMotiu("Reobrir la facturació de "+nomMes(m),"Es podran tornar a canviar les línies. Si comptabilitat ja ha passat la remesa al banc, no la reobris: afegeix les correccions al mes següent.","Reobrir",mo=>{
+    const f=facMes(m); (f.hist=f.hist||[]).push({tancada:f.tancada,rebuts:(f.rebuts||[]).length,reoberta:{per:quiSoc(),data:araIso(),motiu:mo}});
+    const A=apCfg(); Object.keys(A.cobraments).forEach(k=>{ const c=A.cobraments[k]; if(c&&c.via==="remesa"&&c.mes===m) delete A.cobraments[k]; });
+    f.estat="oberta"; delete f.linies; delete f.rebuts; delete f.tancada; logCanvi("Facturació reoberta",nomMes(m),mo); save(); toast("Facturació de "+nomMes(m)+" reoberta."); render(); });
+};
+function formCarrec(m){
+  const socis=D.socis.filter(s=>!s.baixa&&inCasal(s)).sort((a,b)=>nomComplet(a).localeCompare(nomComplet(b),"ca"));
+  const acts=D.activitats.filter(a=>inCasal(a)&&(a.inscrits||[]).length).sort(ordAct);
+  overlay(hdr("Altre càrrec",nomMes(m))+'<form class="form" id="fcar" novalidate>'+
+    '<div class="field full"><label>A qui es cobra</label><div class="filters" role="group" style="margin:0"><button type="button" data-cqui="p" aria-pressed="true">Una persona</button><button type="button" data-cqui="a" aria-pressed="false">Totes les inscrites a una activitat</button></div></div>'+
+    '<div class="field full" id="cqP"><label for="c_s">Persona</label><select id="c_s"><option value="">Tria la persona…</option>'+socis.map(s=>'<option value="'+s.id+'">'+esc(nomComplet(s))+(S.casal==="tots"?' · '+esc(casal(s.casal).curt):'')+'</option>').join("")+'</select></div>'+
+    '<div class="field full" id="cqA" hidden><label for="c_a">Activitat</label><select id="c_a"><option value="">Tria l\'activitat…</option>'+acts.map(a=>'<option value="'+a.id+'">'+esc(a.nom)+' · '+esc(casal(a.casal).curt)+' ('+a.inscrits.length+' persones)</option>').join("")+'</select></div>'+
+    '<div class="field"><label for="c_t">Tipus</label><select id="c_t">'+CARRECS_T.map(t=>'<option>'+t+'</option>').join("")+'</select></div>'+
+    '<div class="field"><label for="c_i">Import per persona (€)</label><input id="c_i" type="number" min="0.01" step="0.01"></div>'+
+    '<div class="field full"><label for="c_c">Concepte (sortirà al rebut)</label><input id="c_c" maxlength="80" placeholder="Ex.: Sortida a Montserrat"></div>'+
+    '<div class="full alert" id="carerr" hidden></div><div class="m-f full"><button type="button" class="btn ghost" data-close>Cancel·lar</button><button class="btn primary" type="submit">Afegir</button></div></form>');
+  let qui="p";
+  document.querySelectorAll("[data-cqui]").forEach(b=>b.onclick=()=>{ qui=b.dataset.cqui; document.querySelectorAll("[data-cqui]").forEach(x=>x.setAttribute("aria-pressed",String(x===b))); $("#cqP").hidden=qui!=="p"; $("#cqA").hidden=qui!=="a"; });
+  $("#fcar").onsubmit=e=>{ e.preventDefault(); const er=$("#carerr"), imp=r2($("#c_i").value), con=$("#c_c").value.trim(), tip=$("#c_t").value;
+    const ids = qui==="p" ? ($("#c_s").value?[$("#c_s").value]:[]) : (((D.activitats.find(a=>a.id===$("#c_a").value)||{}).inscrits)||[]).filter(x=>soci(x));
+    const err = !ids.length ? (qui==="p"?"Tria la persona.":"Tria una activitat amb persones inscrites.") : !(imp>0&&imp<=9999) ? "Escriu un import correcte." : con.length<3 ? "Escriu el concepte." : "";
+    if(err){ er.textContent=err; er.hidden=false; return; }
+    if(!D.carrecs) D.carrecs=[];
+    ids.forEach(sid=>D.carrecs.push({id:uid("cr"),mes:m,soci:sid,casal:soci(sid).casal,tipus:tip,concepte:con,import:imp,creat:araIso(),per:quiSoc()}));
+    logCanvi("Facturació: altre càrrec",nomMes(m)+" · "+con+" · "+eur(imp)+" × "+ids.length); save(); closeOverlay(); toast("Afegit a "+ids.length+(ids.length===1?" persona.":" persones.")); render(); };
+}
+function tancarFact(m){
+  const L=liniesMes(m), R=rebutsDe(L), av=avisosFact(R), AV=isoAvui();
+  const def=addDays(AV,3)>m+"-05" ? addDays(AV,3) : m+"-05";
+  const sum=t=>r2(R.filter(t).reduce((x,r)=>x+r.import,0));
+  overlay(hdr("Tancar la facturació de "+nomMes(m),"Facturació")+'<form class="form" id="ftc" novalidate>'+
+    '<dl class="dl full"><dt>Rebuts</dt><dd class="num">'+R.length+' · '+eur(sum(()=>true))+'</dd><dt>Domiciliació</dt><dd class="num">'+R.filter(r=>r.forma==="dom").length+' · '+eur(sum(r=>r.forma==="dom"))+'</dd><dt>Cobrar al casal</dt><dd class="num">'+R.filter(r=>r.forma!=="dom").length+' · '+eur(sum(r=>r.forma!=="dom"))+'</dd></dl>'+
+    '<div class="field"><label for="tc_d">Data prevista del càrrec al banc</label><input id="tc_d" type="date" min="'+AV+'" value="'+def+'"></div>'+
+    (av.length?'<p class="alert full" style="margin:0">Hi ha '+av.length+' avisos per revisar (dades bancàries). Si tanques ara, aquestes persones es cobraran al casal.</p>':'')+
+    '<label class="check full"><input type="checkbox" id="tc_ok">He revisat les línies i els imports d\'aquest mes</label>'+
+    '<p class="note full" style="margin:0">En tancar: es numeren els rebuts, el mes queda bloquejat i es descarrega l\'Excel per a comptabilitat. Els àpats domiciliats queden marcats com a cobrats.</p>'+
+    '<div class="full alert" id="tcerr" hidden></div><div class="m-f full"><button type="button" class="btn ghost" data-close>Cancel·lar</button><button class="btn primary" type="submit">Tancar i generar</button></div></form>');
+  $("#ftc").onsubmit=async e=>{ e.preventDefault(); const er=$("#tcerr"), d=$("#tc_d").value;
+    if(!$("#tc_ok").checked){ er.textContent="Marca la casella per confirmar que ho has revisat."; er.hidden=false; return; }
+    if(!d||d<AV){ er.textContent="Tria una data de càrrec a partir d'avui."; er.hidden=false; return; }
+    const f=facObre(m); if(f.estat==="tancada"){ closeOverlay(); render(); return; }
+    R.forEach((r,i)=>{ r.num="R-"+m.replace("-","")+"-"+String(i+1).padStart(4,"0"); r.concepte=conceptRebut(r,m); r.linies=r.linies.map(l=>{ const {cobrat,...x}=l; return x; }); });
+    f.linies=L.map(l=>{ const {cobrat,...x}=l; return x; }); f.rebuts=R; f.estat="tancada"; f.tancada={data:araIso(),per:quiSoc(),dataCarrec:d};
+    const A=apCfg(); R.filter(r=>r.forma==="dom").forEach(r=>r.linies.filter(l=>l.tipus==="apat").forEach(l=>{ A.cobraments[m+"|"+l.soci]={data:AV,import:l.import,dinars:l.quant,preu:l.preu,reg:0,via:"remesa",mes:m,rebut:r.num}; }));
+    logCanvi("Facturació tancada",nomMes(m)+" · "+R.length+" rebuts · "+eur(sum(()=>true))); save(); closeOverlay(); render(); toast("Facturació de "+nomMes(m)+" tancada.");
+    await baixaExcelFact(m); };
 }
 
 const VIEWS_INFORMES_INTERN=VIEWS.informes, BIND_INFORMES_INTERN=BIND.informes;
