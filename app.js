@@ -280,17 +280,30 @@ const esAvuiLaborable = () => { const d=new Date().getDay(); return d>=1&&d<=5; 
 const activitatsDe = sid => D.activitats.filter(a=>a.inscrits.includes(sid));
 const esperaDe = sid => D.activitats.filter(a=>a.espera.includes(sid));
 
-function inscriure(a, sid){
+/* Inscripció «de prova»: la persona prova l'activitat abans de decidir. Ocupa plaça però no es cobra fins a l'alta definitiva.
+   Es desa a l'activitat: a.prova = {idPersona: {des:"AAAA-MM-DD", per:"qui"}} */
+const DIES_PROVA = 14; // la prova dura com a màxim dues setmanes
+const deProva = (a,sid) => !!(a&&a.prova&&a.prova[sid]);
+const provaDe = a => (a.prova?Object.keys(a.prova):[]).filter(x=>a.inscrits.includes(x)||a.espera.includes(x));
+function marcaProva(a, sid){ a.prova=a.prova||{}; a.prova[sid]={des:isoAvui(),per:quiSoc()}; }
+function inscriure(a, sid, prova){
   if(a.inscrits.includes(sid)||a.espera.includes(sid)) return "ja";
+  if(prova){ marcaProva(a,sid); logCanvi("Inscripció de prova",nomComplet(soci(sid))+" · "+a.nom); }
   if(a.inscrits.length < a.places){ a.inscrits.push(sid); save(); return "inscrit"; }
   a.espera.push(sid); save(); return "espera";
 }
+/* Baixa: la plaça queda lliure. Ningú no entra sol des de la llista d'espera: ho decideix la coordinació o la professional
+   (botó «Donar-li la plaça» a la llista de l'activitat). */
+const avisEspera = a => (a.espera.length && a.inscrits.length<a.places) ? " Hi ha "+a.espera.length+" a l'espera: decidiu qui ocupa la plaça (botó Llista)." : "";
+function donarPlaca(a, sid){
+  if(!a.espera.includes(sid) || a.inscrits.length>=a.places) return false;
+  a.espera=a.espera.filter(x=>x!==sid); a.inscrits.push(sid); logCanvi("Plaça donada des de la llista d'espera",nomComplet(soci(sid))+" · "+a.nom); save(); return true;
+}
 function baixa(a, sid){
   let promo=null;
-  if(a.inscrits.includes(sid)){
-    a.inscrits = a.inscrits.filter(x=>x!==sid);
-    if(a.espera.length && a.inscrits.length < a.places){ promo=a.espera.shift(); a.inscrits.push(promo); }
-  } else a.espera = a.espera.filter(x=>x!==sid);
+  if(a.inscrits.includes(sid)) a.inscrits = a.inscrits.filter(x=>x!==sid);
+  else a.espera = a.espera.filter(x=>x!==sid);
+  if(a.prova&&a.prova[sid]){ delete a.prova[sid]; if(!Object.keys(a.prova).length) delete a.prova; }
   save(); return promo;
 }
 const salaLliure = id => { const x=D.sales.find(y=>y.id===id); return !!(x&&x.perAssignar); };
@@ -437,7 +450,7 @@ const RULES=[
   ["#nouSoci,[data-go='socis-nou']","persones","E","h"],["#edSoci","persones","M","h"],["#delSoci","persones","B","h"],["#baixaSoci","persones","M","h"],
   [".sens","seguiment","C","h"],["#fsSeg,#fsDer,[data-sg],[data-dv]","seguiment","E","h"],["#fsAco,[data-ac]","seguiment","M","h"],["[data-dvst]","seguiment","M","d"],
   ["#novaAct","activitats","E","h"],["#delAct","activitats","B","h"],
-  ["#insSoci,[data-ins],.modal [data-s],.modal [data-a]","inscripcions","E","h"],["[data-baixa],.modal [data-b]","inscripcions","M","h"],["[data-pl]","llista","E","d"],
+  ["#insSoci,[data-ins],.modal [data-s],.modal [data-a]","inscripcions","E","h"],["[data-baixa],.modal [data-b],[data-pdef],[data-pbaixa],.modal [data-epro]","inscripcions","M","h"],["[data-pl]","llista","E","d"],
   ["#gestSales","espais","C","h"],["#novaSala","espais","E","h"],["[data-eds]","espais","M","h"],["#delSala","espais","B","h"],
   ["#novaRes","reserves","E","h"],["[data-delres]","reserves","M","h"],
   ["#novaComanda","comandes","E","h"],["#nouProv,#nouProdC","proveidors","E","h"],["[data-eprov],[data-eprod],#edAdr","proveidors","M","h"],
@@ -1054,16 +1067,18 @@ function fitxaSoci(id){
   '<button class="btn" id="insSoci">'+ICON.plus+'Inscriure a una activitat</button>'+
   '<p class="note" style="margin:0">Les dades de salut no es guarden aquí. Només observacions pràctiques per a l\'activitat, amb consentiment.</p>';
   const o=overlay(html,true);
-  o.querySelectorAll("[data-baixa]").forEach(b=>b.onclick=()=>{ const a=D.activitats.find(x=>x.id===b.dataset.baixa); const p=baixa(a,id); toast(p? "Baixa feta. "+soci(p).nom+" passa de la llista d'espera a inscrit/a." : "Baixa feta."); render(); fitxaSoci(id); });
+  o.querySelectorAll("[data-baixa]").forEach(b=>b.onclick=()=>{ const a=D.activitats.find(x=>x.id===b.dataset.baixa); baixa(a,id); toast("Baixa feta."+avisEspera(a)); render(); fitxaSoci(id); });
   o.querySelector("#edSoci").onclick=()=>formSoci(id);
   const iv=o.querySelector("#fsIbanVeure"); if(iv) iv.onclick=()=>{ o.querySelector("#fsIban").textContent=ibanFmt(s.priv.iban); iv.remove(); logCanvi("Consulta del compte bancari",nomComplet(s)); save(); };
   o.querySelector("#fsSeg").onclick=()=>formSeguiment(id);
   const fd=o.querySelector("#fsDer"); if(fd) fd.onclick=()=>formDerivacio(id);
   const fa=o.querySelector("#fsAco"); if(fa) fa.onclick=()=>formAcollida(id);
-  o.querySelector("#insSoci").onclick=()=>{
+  o.querySelector("#insSoci").onclick=()=>{ S.insProva=false;
     const disp=D.activitats.filter(a=>a.casal===s.casal && !a.inscrits.includes(id) && !a.espera.includes(id));
-    overlay(hdr("Inscriure "+s.nom,"Tria l'activitat")+'<div class="list">'+disp.map(a=>'<div class="row"><div class="t"><b>'+esc(a.nom)+'</b><span>'+horari(a)+' · '+a.inscrits.length+'/'+a.places+'</span></div><button class="btn sm '+(a.inscrits.length<a.places?'primary':'')+'" data-a="'+a.id+'">'+(a.inscrits.length<a.places?'Inscriure':'A l\'espera')+'</button></div>').join("")+'</div>');
-    document.querySelectorAll(".modal [data-a]").forEach(b=>b.onclick=()=>{ const a=D.activitats.find(x=>x.id===b.dataset.a); const r=inscriure(a,id); toast(r==="inscrit"? s.nom+" inscrit/a a "+a.nom+"." : s.nom+" a la llista d'espera (posició "+a.espera.length+")."); render(); fitxaSoci(id); });
+    const pinta=()=>{ overlay(hdr("Inscriure "+s.nom,"Tria l'activitat")+tipusInsHTML()+'<div class="list">'+disp.map(a=>'<div class="row"><div class="t"><b>'+esc(a.nom)+'</b><span>'+horari(a)+' · '+a.inscrits.length+'/'+a.places+'</span></div><button class="btn sm '+(a.inscrits.length<a.places?'primary':'')+'" data-a="'+a.id+'">'+(a.inscrits.length<a.places?'Inscriure':'A l\'espera')+'</button></div>').join("")+'</div>');
+    bindTipusIns(pinta);
+    document.querySelectorAll(".modal [data-a]").forEach(b=>b.onclick=()=>{ const a=D.activitats.find(x=>x.id===b.dataset.a); const r=inscriure(a,id,S.insProva); toast((r==="inscrit"? s.nom+" inscrit/a a "+a.nom : s.nom+" a la llista d'espera (posició "+a.espera.length+")")+(S.insProva?", de prova.":".")); render(); fitxaSoci(id); }); };
+    pinta();
   };
 }
 
@@ -1109,29 +1124,78 @@ VIEWS.activitats = () => {
   return '<div class="head"><div><h1>'+(esResp()?'Les teves activitats':'Activitats')+'</h1><p>'+(esResp()?'Consulta qui hi ha inscrit i passa llista.':'Programació setmanal i activitats puntuals per eixos d\'envelliment actiu.')+'</p></div><button class="btn primary" id="novaAct">'+ICON.plus+'Nova activitat</button></div>'+
   '<div class="filters" role="group" aria-label="Eix">'+[["tots","Tots els eixos"]].concat(Object.entries(EIX_C)).concat([["punt","Puntuals"]]).map(f=>'<button data-eix="'+f[0]+'" aria-pressed="'+(S.eix===f[0])+'">'+f[1]+'</button>').join("")+'</div>'+
   (esResp()&&!acts.length?'<div class="empty">Encara no tens cap activitat assignada. Parla amb la coordinació.</div>':'')+
+  (esResp()?'':placesDecidirHTML(D.activitats.filter(inCasal))+provesHTML(D.activitats.filter(inCasal))+(esCoord()?bancHTML(D.activitats.filter(inCasal)):''))+
   '<div class="cards">'+acts.map(a=>{ const full=a.inscrits.length>=a.places, pct=Math.min(100,a.inscrits.length/a.places*100);
     return '<article class="card"><div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start"><h3>'+esc(a.nom)+'</h3>'+eixChip(a.eix)+'</div>'+
     (esPunt(a)?'<div><span class="chip" style="background:var(--accent-soft,#EEE8FF);color:var(--accent,#6C4BD8)">Puntual'+(a.data<isoAvui()?' · feta':'')+'</span></div>':'')+(!esPunt(a)&&(a.dIni>isoAvui()||a.dFi)?'<div>'+(a.dIni>isoAvui()?'<span class="chip">Comença el '+fdata(a.dIni)+'</span> ':'')+(a.dFi?'<span class="chip'+(a.dFi<isoAvui()?' warn':'')+'">'+(a.dFi<isoAvui()?'Acabada el ':'Fins al ')+fdata(a.dFi)+'</span>':'')+'</div>':'')+(prop(a).length?'<div>'+prop(a).slice(0,2).map(x=>'<span class="chip warn">No es fa '+fdata(x.d)+'</span> ').join("")+'</div>':'')+
     '<div class="meta"><span>'+horari(a)+'</span><span>'+esc(sala(a.sala).nom)+(S.casal==="tots"?' · '+esc(casal(a.casal).nom):'')+'</span><span>'+esc(a.prof)+' · '+(a.preu?eur(a.preu)+(esPunt(a)?'':' / mes'):'Gratuïta')+(a.comp?' · Complementària':'')+'</span></div>'+
-    '<div><div class="places"><span class="num"><b>'+a.inscrits.length+'</b> / '+a.places+' places</span>'+(full?'<span class="chip warn">Plena · '+a.espera.length+' en espera</span>':'<span style="color:var(--muted)">'+(a.places-a.inscrits.length)+' lliures</span>')+'</div><div class="bar'+(full?' full':'')+'" style="margin-top:8px"><i style="width:'+pct+'%"></i></div></div>'+
+    '<div><div class="places"><span class="num"><b>'+a.inscrits.length+'</b> / '+a.places+' places'+(provaDe(a).length?' <span class="chip warn" title="Ocupen plaça però encara no es cobren">'+provaDe(a).length+' de prova</span>':'')+'</span>'+(full?'<span class="chip warn">Plena · '+a.espera.length+' en espera</span>':a.espera.length?'<span class="chip crit">'+(a.places-a.inscrits.length)+' lliures · '+a.espera.length+' en espera</span>':'<span style="color:var(--muted)">'+(a.places-a.inscrits.length)+' lliures</span>')+'</div><div class="bar'+(full?' full':'')+'" style="margin-top:8px"><i style="width:'+pct+'%"></i></div></div>'+
     '<div class="actions"><button class="btn sm primary" data-ins="'+a.id+'">Inscriure</button><button class="btn sm" data-llista="'+a.id+'">Llista</button></div></article>'; }).join("")+'</div>';
 };
+function provesHTML(acts){
+  const L=[]; acts.forEach(a=>provaDe(a).forEach(sid=>{ if(soci(sid)) L.push({a,sid,p:a.prova[sid],esp:a.espera.includes(sid)}); }));
+  if(!L.length) return '';
+  L.sort((x,y)=>x.p.des.localeCompare(y.p.des));
+  return '<section class="panel prova-p"><div class="panel-h"><div><h2>Persones de prova</h2><p style="margin:2px 0 0;color:var(--muted);font-size:14px">Ocupen plaça però encara no es cobren. La prova dura com a màxim dues setmanes: decideix si es queden (alta definitiva) o no (baixa).</p></div>'+(L.some(o=>diesEntre(o.p.des,isoAvui())>DIES_PROVA)?'<span class="chip crit">'+L.filter(o=>diesEntre(o.p.des,isoAvui())>DIES_PROVA).length+' acabades</span>':'')+'<span class="chip warn">'+L.length+'</span></div><div class="list">'+
+    L.map(o=>{ const s=soci(o.sid), dies=diesEntre(o.p.des,isoAvui()), fi=addDays(o.p.des,DIES_PROVA), venc=dies>DIES_PROVA; return '<div class="row prova-r'+(venc?' venc':'')+'"><span class="avatar">'+inicials(s)+'</span><div class="t"><b>'+esc(nomComplet(s))+'</b><span>'+esc(o.a.nom)+(S.casal==="tots"?' · '+esc(casal(o.a.casal).curt):'')+' · de prova des del '+fdata(o.p.des)+' · '+(venc?'<b style="color:var(--crit)">Prova acabada el '+fdata(fi)+': cal decidir</b>':'acaba el '+fdata(fi)+' (queden '+(DIES_PROVA-dies)+' dies)')+(o.esp?' · en llista d\'espera':'')+'</span></div>'+
+      '<div class="prova-b"><button class="btn sm primary" data-pdef="'+o.a.id+'|'+o.sid+'">Alta definitiva</button><button class="btn sm ghost danger" data-pbaixa="'+o.a.id+'|'+o.sid+'">Baixa</button></div></div>'; }).join("")+'</div></section>';
+}
+function placesDecidirHTML(acts){
+  const L=acts.filter(a=>a.espera.length&&a.inscrits.length<a.places&&(!esPunt(a)||a.data>=isoAvui()));
+  if(!L.length) return '';
+  return '<section class="panel avis-p crit"><div class="panel-h"><div><h2>Places lliures amb llista d\'espera</h2><p class="abs-sub">Ningú no entra sol. Obre la llista i tria qui ocupa la plaça.</p></div><span class="chip crit">'+L.length+'</span></div><div class="list">'+
+    L.map(a=>'<div class="row"><div class="t"><b>'+esc(a.nom)+(S.casal==="tots"?' · '+esc(casal(a.casal).curt):'')+'</b><span>'+((a.places-a.inscrits.length)===1?'1 plaça lliure':(a.places-a.inscrits.length)+' places lliures')+' · '+a.espera.length+' a l\'espera</span></div><button class="btn sm primary" data-llista="'+a.id+'">Decidir</button></div>').join("")+'</div></section>';
+}
+/* Persones inscrites (definitives) a activitats de pagament que no es poden cobrar per domiciliació. Només Coordinació i Supervisió (dades bancàries). */
+function bancPendents(acts){
+  const per={};
+  acts.filter(a=>r2(a.preu)>0&&(!esPunt(a)||a.data>=isoAvui())).forEach(a=>a.inscrits.forEach(sid=>{ const s=soci(sid); if(!s||deProva(a,sid)) return;
+    const p=s.priv||{}; let motiu="";
+    if(!p.iban) motiu="No ha facilitat el compte bancari";
+    else if(!ibanOk(p.iban)) motiu="El compte bancari no és correcte";
+    else if(!domiciliada(s)) motiu="Falta signar l'autorització de domiciliació";
+    else if(!p.mandat) motiu="Falta la data de signatura de la domiciliació";
+    else if(!p.dni) motiu="Falta el DNI/NIE";
+    if(!motiu) return; (per[sid]=per[sid]||{s,motiu,acts:[]}).acts.push(a.nom); }));
+  return Object.values(per).sort((x,y)=>nomComplet(x.s).localeCompare(nomComplet(y.s),"ca"));
+}
+function bancHTML(acts){
+  const L=bancPendents(acts); if(!L.length) return '';
+  return '<details class="panel avis-p banc-p"'+(S.bancObert?' open':'')+'><summary class="panel-h"><div><h2>Dades bancàries per reclamar</h2><p class="abs-sub">Persones apuntades a activitats de pagament que encara no es poden cobrar per domiciliació. Prem per veure-les.</p></div><span class="chip warn">'+L.length+'</span></summary><div class="list">'+
+    L.map(o=>'<div class="row prova-r"><span class="avatar">'+inicials(o.s)+'</span><div class="t"><button class="abs-n" data-bsoci="'+o.s.id+'">'+esc(nomComplet(o.s))+'</button><span>'+esc(o.motiu)+' · '+esc(o.acts.join(", "))+'</span></div>'+(o.s.tel?'<a class="abs-tel" href="tel:'+esc(o.s.tel.replace(/\s/g,""))+'">'+ICON.phone+esc(o.s.tel)+'</a>':'')+'</div>').join("")+
+    '</div><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" id="bancCopia">Copiar la llista</button></div><p class="note" style="margin:0">Quan us donin les dades, entreu-les a la fitxa (Editar → Dades administratives) i marqueu «Domiciliació bancària».</p></details>';
+}
+function bindBanc(){
+  const d=$(".banc-p"); if(d) d.ontoggle=()=>{ S.bancObert=d.open; };
+  document.querySelectorAll("[data-bsoci]").forEach(b=>b.onclick=()=>fitxaSoci(b.dataset.bsoci));
+  const c=$("#bancCopia"); if(c) c.onclick=()=>copiar(csv([["Persona","Telèfon","Què falta","Activitats"]].concat(bancPendents(D.activitats.filter(inCasal)).map(o=>[nomComplet(o.s),o.s.tel||"",o.motiu,o.acts.join(", ")]))));
+}
+function bindProves(){
+  bindBanc();
+  const get=v=>{ const [aid,sid]=v.split("|"); return {a:D.activitats.find(x=>x.id===aid),sid}; };
+  document.querySelectorAll("[data-pdef]").forEach(b=>b.onclick=()=>{ const {a,sid}=get(b.dataset.pdef); if(!a) return; delete a.prova[sid]; if(!Object.keys(a.prova).length) delete a.prova; logCanvi("Alta definitiva (després de la prova)",nomComplet(soci(sid))+" · "+a.nom); save(); toast(soci(sid).nom+" queda inscrit/a de manera definitiva a "+a.nom+". Es cobrarà a partir d'aquest mes."); render(); });
+  document.querySelectorAll("[data-pbaixa]").forEach(b=>b.onclick=()=>{ const {a,sid}=get(b.dataset.pbaixa); if(!a) return; confirmar("Baixa de "+soci(sid).nom,"Deixa la prova de «"+a.nom+"» i allibera la plaça. No se li cobrarà res.","Donar de baixa",()=>{ baixa(a,sid); logCanvi("Baixa després de la prova",nomComplet(soci(sid))+" · "+a.nom); save(); toast("Baixa feta."+avisEspera(a)); render(); }); });
+}
 BIND.activitats = () => {
+  bindProves();
   document.querySelectorAll("[data-eix]").forEach(b=>b.onclick=()=>{ S.eix=b.dataset.eix; render(); });
-  document.querySelectorAll("[data-ins]").forEach(b=>b.onclick=()=>inscriureModal(b.dataset.ins));
+  document.querySelectorAll("[data-ins]").forEach(b=>b.onclick=()=>{ S.insProva=false; inscriureModal(b.dataset.ins); });
   document.querySelectorAll("[data-llista]").forEach(b=>b.onclick=()=>llistaAct(b.dataset.llista));
   $("#novaAct").onclick=()=>formAct();
   if(esResp()){ const n=$("#novaAct"); if(n) n.hidden=true; }
 };
+const tipusInsHTML = () => '<div class="field"><span class="section-t">Tipus d\'inscripció</span><div class="filters" role="group" aria-label="Tipus d\'inscripció" style="margin:0"><button type="button" data-insp="0" aria-pressed="'+!S.insProva+'">Definitiva</button><button type="button" data-insp="1" aria-pressed="'+!!S.insProva+'">De prova (encara no es cobra)</button></div></div>';
+function bindTipusIns(refresh){ document.querySelectorAll(".modal [data-insp]").forEach(b=>b.onclick=()=>{ S.insProva=b.dataset.insp==="1"; refresh(); }); }
 function inscriureModal(aid, q){
   const a=D.activitats.find(x=>x.id===aid); q=q||"";
   const cand=D.socis.filter(s=>s.casal===a.casal && !a.inscrits.includes(s.id) && !a.espera.includes(s.id) && (!q||nomComplet(s).toLowerCase().includes(q.toLowerCase())));
   const full=a.inscrits.length>=a.places;
-  overlay(hdr("Inscriure a "+a.nom, horari(a))+(full?'<div class="note">Activitat plena. Les noves inscripcions van a la llista d\'espera i entren automàticament quan algú es dona de baixa.</div>':'<div class="note">Queden '+(a.places-a.inscrits.length)+' places.</div>')+
-  '<label class="search">'+ICON.search+'<input id="qi" type="search" placeholder="Cerca soci" value="'+esc(q)+'" aria-label="Cerca soci"></label><div class="list">'+
+  overlay(hdr("Inscriure a "+a.nom, horari(a))+(full?'<div class="note">Activitat plena. Les noves inscripcions van a la llista d\'espera. Quan quedi una plaça, la coordinació o la professional decideix qui entra.</div>':'<div class="note">Queden '+(a.places-a.inscrits.length)+' places.</div>')+
+  tipusInsHTML()+'<label class="search">'+ICON.search+'<input id="qi" type="search" placeholder="Cerca soci" value="'+esc(q)+'" aria-label="Cerca soci"></label><div class="list">'+
   (cand.slice(0,40).map(s=>'<div class="row"><div class="who" style="flex:1"><span class="avatar">'+inicials(s)+'</span><div>'+esc(nomComplet(s))+'<small>Núm. '+s.num+'</small></div></div><button class="btn sm '+(full?'':'primary')+'" data-s="'+s.id+'">'+(full?'A l\'espera':'Inscriure')+'</button></div>').join("")||'<div class="empty">No hi ha socis per inscriure.</div>')+'</div>');
   const qi=$("#qi"); qi.oninput=()=>{ const p=qi.selectionStart; inscriureModal(aid, qi.value); const n=$("#qi"); n.focus(); n.setSelectionRange(p,p); };
-  document.querySelectorAll(".modal [data-s]").forEach(b=>b.onclick=()=>{ const s=soci(b.dataset.s); const r=inscriure(a,s.id); toast(r==="inscrit"? s.nom+" inscrit/a." : s.nom+" a la llista d'espera (posició "+a.espera.length+")."); render(); inscriureModal(aid, $("#qi")?$("#qi").value:""); });
+  bindTipusIns(()=>inscriureModal(aid, $("#qi")?$("#qi").value:""));
+  document.querySelectorAll(".modal [data-s]").forEach(b=>b.onclick=()=>{ const s=soci(b.dataset.s); const r=inscriure(a,s.id,S.insProva); toast((r==="inscrit"? s.nom+" inscrit/a" : s.nom+" a la llista d'espera (posició "+a.espera.length+")")+(S.insProva?" de prova (no es cobra).":".")); render(); inscriureModal(aid, $("#qi")?$("#qi").value:""); });
 }
 function darreraSessio(a){ if(esPunt(a)) return a.data; let d=isoAvui(); for(let i=0;i<35;i++){ if(actEnData(a,d)) return d; d=addDays(d,-1); } return a.dFi&&a.dFi<isoAvui()?a.dFi:d; }
 function properesSessions(a,n){ const out=[]; let d=isoAvui(); for(let i=0;i<120&&out.length<n;i++){ if(actEnData(a,d)) out.push(d); d=addDays(d,1); } return out; }
@@ -1153,9 +1217,10 @@ function llistaAct(aid){
   (can("activitats","M")||can("activitats","B")?'<div style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap">'+(can("activitats","M")?'<button class="btn sm" id="edAct">Editar</button>'+(esPunt(a)?'':'<button class="btn sm" id="anAct">Anul·lar una sessió</button>'):'')+(can("activitats","B")?'<button class="btn sm ghost danger" id="delAct">Esborrar activitat</button>':'')+'</div>':'')+
   '<div class="note">Passar llista de la sessió de '+DIES7[wd(ses)].toLowerCase()+' '+fdata(ses)+': '+pres.length+' de '+a.inscrits.length+' presents.</div>'+
   (a.extres?'<div class="note">Autocar: <b>'+a.inscrits.filter(x=>exA(a,x).au).length+'</b> · Transport adaptat: <b>'+a.inscrits.filter(x=>exA(a,x).ta).length+'</b></div>':'')+
-  '<div><div class="section-t">Inscrits ('+a.inscrits.length+'/'+a.places+')</div><div class="list">'+(a.inscrits.map((id,i)=>{const s=soci(id); const hi=pres.includes(id); return '<div class="row"><span class="num" style="width:22px;color:var(--muted)">'+(i+1)+'</span><div class="t"><b>'+esc(nomComplet(s))+'</b>'+(can("persones","C")?'<span class="num">'+esc(s.tel)+'</span>':'')+(a.extres?'<span style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px"><button class="tog" data-ex="au|'+id+'" aria-pressed="'+!!exA(a,id).au+'">Autocar</button><button class="tog" data-ex="ta|'+id+'" aria-pressed="'+!!exA(a,id).ta+'">T. adaptat</button><input data-exc="'+id+'" value="'+esc(exA(a,id).ct||"")+'" placeholder="Persona de contacte i telèfon" aria-label="Persona de contacte de '+esc(nomComplet(s))+'" style="flex:1;min-width:160px"></span>':'')+'</div><button class="tog" data-pl="'+id+'" aria-pressed="'+hi+'">'+(hi?'Present':'Absent')+'</button><button class="btn sm ghost danger" data-b="'+id+'">Baixa</button></div>';}).join("")||'<div class="empty">Encara no hi ha inscrits.</div>')+'</div></div>'+
-  '<div><div class="section-t">Llista d\'espera ('+a.espera.length+')</div><div class="list">'+(a.espera.map((id,i)=>{const s=soci(id); return '<div class="row"><span class="chip warn num">'+(i+1)+'</span><div class="t"><b>'+esc(nomComplet(s))+'</b><span>Entrarà quan quedi una plaça</span></div><button class="btn sm ghost" data-b="'+id+'">Treure</button></div>';}).join("")||'<div class="empty">Ningú en espera.</div>')+'</div></div>');
-  document.querySelectorAll(".modal [data-b]").forEach(b=>b.onclick=()=>{ const p=baixa(a,b.dataset.b); toast(p? soci(p).nom+" entra des de la llista d'espera." : "Fet."); render(); llistaAct(aid); });
+  '<div><div class="section-t">Inscrits ('+a.inscrits.length+'/'+a.places+')</div><div class="list">'+(a.inscrits.map((id,i)=>{const s=soci(id); const hi=pres.includes(id); return '<div class="row"><span class="num" style="width:22px;color:var(--muted)">'+(i+1)+'</span><div class="t"><b>'+esc(nomComplet(s))+(deProva(a,id)?' <span class="chip warn">De prova</span>':'')+'</b>'+(can("persones","C")?'<span class="num">'+esc(s.tel)+'</span>':'')+(a.extres?'<span style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px"><button class="tog" data-ex="au|'+id+'" aria-pressed="'+!!exA(a,id).au+'">Autocar</button><button class="tog" data-ex="ta|'+id+'" aria-pressed="'+!!exA(a,id).ta+'">T. adaptat</button><input data-exc="'+id+'" value="'+esc(exA(a,id).ct||"")+'" placeholder="Persona de contacte i telèfon" aria-label="Persona de contacte de '+esc(nomComplet(s))+'" style="flex:1;min-width:160px"></span>':'')+'</div><button class="tog" data-pl="'+id+'" aria-pressed="'+hi+'">'+(hi?'Present':'Absent')+'</button><button class="btn sm ghost danger" data-b="'+id+'">Baixa</button></div>';}).join("")||'<div class="empty">Encara no hi ha inscrits.</div>')+'</div></div>'+
+  '<div><div class="section-t">Llista d\'espera ('+a.espera.length+')</div><div class="list">'+(a.espera.map((id,i)=>{const s=soci(id); return '<div class="row"><span class="chip warn num">'+(i+1)+'</span><div class="t"><b>'+esc(nomComplet(s))+(deProva(a,id)?' <span class="chip warn">De prova</span>':'')+'</b><span>'+(a.inscrits.length<a.places?'Hi ha plaça lliure: decidiu si entra':'Esperant plaça')+(can("persones","C")&&s.tel?' · '+esc(s.tel):'')+'</span></div>'+(a.inscrits.length<a.places?'<button class="btn sm primary" data-epro="'+id+'">Donar-li la plaça</button>':'')+'<button class="btn sm ghost" data-b="'+id+'">Treure</button></div>';}).join("")||'<div class="empty">Ningú en espera.</div>')+'</div></div>');
+  document.querySelectorAll(".modal [data-b]").forEach(b=>b.onclick=()=>{ baixa(a,b.dataset.b); toast("Fet."+avisEspera(a)); render(); llistaAct(aid); });
+  document.querySelectorAll(".modal [data-epro]").forEach(b=>b.onclick=()=>{ const sid=b.dataset.epro; if(donarPlaca(a,sid)) toast(soci(sid).nom+" ja és inscrit/a a "+a.nom+(deProva(a,sid)?" (de prova).":".")); render(); llistaAct(aid); });
   const ea=$("#edAct"); if(ea) ea.onclick=()=>formAct(aid);
   const aa=$("#anAct"); if(aa) aa.onclick=()=>anularSessio(aid);
   const da=$("#delAct"); if(da) da.onclick=()=>confirmMotiu("Esborrar "+a.nom,"Se n'esborren les inscripcions i la llista d'espera. Si només s'atura, millor no esborrar-la.","Esborrar",m=>{ D.activitats=D.activitats.filter(x=>x.id!==a.id); D.rebuts=D.rebuts.filter(r=>r.act!==a.id||D.mesosTancats[r.mes]); logCanvi("Esborrat d'activitat",a.nom+" · "+casal(a.casal).curt,m); save(); toast("Activitat esborrada."); render(); });
@@ -2323,7 +2388,7 @@ function liniesAuto(m){
   D.activitats.filter(a=>r2(a.preu)>0).forEach(a=>{
     const punt=esPunt(a);
     if(punt ? !(a.data>=ini&&a.data<=fi) : !((!a.dIni||a.dIni<=fi)&&(!a.dFi||a.dFi>=ini))) return;
-    (a.inscrits||[]).forEach(sid=>{ if(!soci(sid)) return;
+    (a.inscrits||[]).forEach(sid=>{ if(!soci(sid)||deProva(a,sid)) return;
       L.push({k:"act|"+a.id+"|"+sid,soci:sid,casal:a.casal,tipus:punt?"punt":"act",ref:a.id,concepte:a.nom+(punt?" ("+fdata(a.data)+")":""),quant:1,preu:r2(a.preu),import:r2(a.preu)}); }); });
   if(D.apats&&D.apats.reserves&&D.casals.some(c=>c.id==="c2")) cobramentsMes(m).forEach(o=>{ if(!(o.imp>0)||!soci(o.x)) return;
     L.push({k:"apat|"+o.x,soci:o.x,casal:"c2",tipus:"apat",ref:"apats",concepte:"Àpats en companyia ("+o.n+" dies"+(o.reg?", amb regularització del mes anterior":"")+")",quant:o.n,preu:r2(o.pu),import:r2(o.imp),cobrat:!!(o.c&&o.c.via!=="remesa")}); });
