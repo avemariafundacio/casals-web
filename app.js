@@ -31,6 +31,7 @@ const ICON = {
   ext:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6"/><path d="M20 4l-9 9"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>',
   cart:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="20" r="1.4"/><circle cx="18" cy="20" r="1.4"/><path d="M2.5 3.5h3l2.4 11.2a1.5 1.5 0 0 0 1.5 1.2h8.4a1.5 1.5 0 0 0 1.5-1.1L21 8H6.6"/></svg>',
   x:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>',
+  print:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9V3h12v6"/><rect x="3" y="9" width="18" height="8" rx="2"/><path d="M6 14h12v7H6z"/></svg>',
   euro:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6.5A7 7 0 1 0 18 17.5"/><path d="M4 10h9M4 14h9"/></svg>'
 };
 
@@ -1130,7 +1131,7 @@ VIEWS.activitats = () => {
     (esPunt(a)?'<div><span class="chip" style="background:var(--accent-soft,#EEE8FF);color:var(--accent,#6C4BD8)">Puntual'+(a.data<isoAvui()?' · feta':'')+'</span></div>':'')+(!esPunt(a)&&(a.dIni>isoAvui()||a.dFi)?'<div>'+(a.dIni>isoAvui()?'<span class="chip">Comença el '+fdata(a.dIni)+'</span> ':'')+(a.dFi?'<span class="chip'+(a.dFi<isoAvui()?' warn':'')+'">'+(a.dFi<isoAvui()?'Acabada el ':'Fins al ')+fdata(a.dFi)+'</span>':'')+'</div>':'')+(prop(a).length?'<div>'+prop(a).slice(0,2).map(x=>'<span class="chip warn">No es fa '+fdata(x.d)+'</span> ').join("")+'</div>':'')+
     '<div class="meta"><span>'+horari(a)+'</span><span>'+esc(sala(a.sala).nom)+(S.casal==="tots"?' · '+esc(casal(a.casal).nom):'')+'</span><span>'+esc(a.prof)+' · '+(a.preu?eur(a.preu)+(esPunt(a)?'':' / mes'):'Gratuïta')+(a.comp?' · Complementària':'')+'</span></div>'+
     '<div><div class="places"><span class="num"><b>'+a.inscrits.length+'</b> / '+a.places+' places'+(provaDe(a).length?' <span class="chip warn" title="Ocupen plaça però encara no es cobren">'+provaDe(a).length+' de prova</span>':'')+'</span>'+(full?'<span class="chip warn">Plena · '+a.espera.length+' en espera</span>':a.espera.length?'<span class="chip crit">'+(a.places-a.inscrits.length)+' lliures · '+a.espera.length+' en espera</span>':'<span style="color:var(--muted)">'+(a.places-a.inscrits.length)+' lliures</span>')+'</div><div class="bar'+(full?' full':'')+'" style="margin-top:8px"><i style="width:'+pct+'%"></i></div></div>'+
-    '<div class="actions"><button class="btn sm primary" data-ins="'+a.id+'">Inscriure</button><button class="btn sm" data-llista="'+a.id+'">Llista</button></div></article>'; }).join("")+'</div>';
+    '<div class="actions"><button class="btn sm primary" data-ins="'+a.id+'">Inscriure</button><button class="btn sm" data-llista="'+a.id+'">Llista</button><button class="btn sm ghost" data-prll="'+a.id+'" title="Imprimir la llista (PDF)">'+ICON.print+'Imprimir</button></div></article>'; }).join("")+'</div>';
 };
 function provesHTML(acts){
   const L=[]; acts.forEach(a=>provaDe(a).forEach(sid=>{ if(soci(sid)) L.push({a,sid,p:a.prova[sid],esp:a.espera.includes(sid)}); }));
@@ -1181,6 +1182,7 @@ BIND.activitats = () => {
   document.querySelectorAll("[data-eix]").forEach(b=>b.onclick=()=>{ S.eix=b.dataset.eix; render(); });
   document.querySelectorAll("[data-ins]").forEach(b=>b.onclick=()=>{ S.insProva=false; inscriureModal(b.dataset.ins); });
   document.querySelectorAll("[data-llista]").forEach(b=>b.onclick=()=>llistaAct(b.dataset.llista));
+  document.querySelectorAll("[data-prll]").forEach(b=>b.onclick=async()=>{ b.disabled=true; await pdfLlista(b.dataset.prll); b.disabled=false; });
   $("#novaAct").onclick=()=>formAct();
   if(esResp()){ const n=$("#novaAct"); if(n) n.hidden=true; }
 };
@@ -1214,13 +1216,14 @@ function anularSessio(aid){
 function llistaAct(aid){
   const a=D.activitats.find(x=>x.id===aid); const ses=darreraSessio(a), key=a.id+"|"+ses, pres=D.assist[key]||[];
   overlay(hdr(a.nom, horari(a)+" · "+sala(a.sala).nom)+
-  (can("activitats","M")||can("activitats","B")?'<div style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap">'+(can("activitats","M")?'<button class="btn sm" id="edAct">Editar</button>'+(esPunt(a)?'':'<button class="btn sm" id="anAct">Anul·lar una sessió</button>'):'')+(can("activitats","B")?'<button class="btn sm ghost danger" id="delAct">Esborrar activitat</button>':'')+'</div>':'')+
+  '<div style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap"><button class="btn sm primary" id="prLl">'+ICON.print+'Imprimir la llista</button>'+(can("activitats","M")||can("activitats","B")?(can("activitats","M")?'<button class="btn sm" id="edAct">Editar</button>'+(esPunt(a)?'':'<button class="btn sm" id="anAct">Anul·lar una sessió</button>'):'')+(can("activitats","B")?'<button class="btn sm ghost danger" id="delAct">Esborrar activitat</button>':''):'')+'</div>'+
   '<div class="note">Passar llista de la sessió de '+DIES7[wd(ses)].toLowerCase()+' '+fdata(ses)+': '+pres.length+' de '+a.inscrits.length+' presents.</div>'+
   (a.extres?'<div class="note">Autocar: <b>'+a.inscrits.filter(x=>exA(a,x).au).length+'</b> · Transport adaptat: <b>'+a.inscrits.filter(x=>exA(a,x).ta).length+'</b></div>':'')+
   '<div><div class="section-t">Inscrits ('+a.inscrits.length+'/'+a.places+')</div><div class="list">'+(a.inscrits.map((id,i)=>{const s=soci(id); const hi=pres.includes(id); return '<div class="row"><span class="num" style="width:22px;color:var(--muted)">'+(i+1)+'</span><div class="t"><b>'+esc(nomComplet(s))+(deProva(a,id)?' <span class="chip warn">De prova</span>':'')+'</b>'+(can("persones","C")?'<span class="num">'+esc(s.tel)+'</span>':'')+(a.extres?'<span style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px"><button class="tog" data-ex="au|'+id+'" aria-pressed="'+!!exA(a,id).au+'">Autocar</button><button class="tog" data-ex="ta|'+id+'" aria-pressed="'+!!exA(a,id).ta+'">T. adaptat</button><input data-exc="'+id+'" value="'+esc(exA(a,id).ct||"")+'" placeholder="Persona de contacte i telèfon" aria-label="Persona de contacte de '+esc(nomComplet(s))+'" style="flex:1;min-width:160px"></span>':'')+'</div><button class="tog" data-pl="'+id+'" aria-pressed="'+hi+'">'+(hi?'Present':'Absent')+'</button><button class="btn sm ghost danger" data-b="'+id+'">Baixa</button></div>';}).join("")||'<div class="empty">Encara no hi ha inscrits.</div>')+'</div></div>'+
   '<div><div class="section-t">Llista d\'espera ('+a.espera.length+')</div><div class="list">'+(a.espera.map((id,i)=>{const s=soci(id); return '<div class="row"><span class="chip warn num">'+(i+1)+'</span><div class="t"><b>'+esc(nomComplet(s))+(deProva(a,id)?' <span class="chip warn">De prova</span>':'')+'</b><span>'+(a.inscrits.length<a.places?'Hi ha plaça lliure: decidiu si entra':'Esperant plaça')+(can("persones","C")&&s.tel?' · '+esc(s.tel):'')+'</span></div>'+(a.inscrits.length<a.places?'<button class="btn sm primary" data-epro="'+id+'">Donar-li la plaça</button>':'')+'<button class="btn sm ghost" data-b="'+id+'">Treure</button></div>';}).join("")||'<div class="empty">Ningú en espera.</div>')+'</div></div>');
   document.querySelectorAll(".modal [data-b]").forEach(b=>b.onclick=()=>{ baixa(a,b.dataset.b); toast("Fet."+avisEspera(a)); render(); llistaAct(aid); });
   document.querySelectorAll(".modal [data-epro]").forEach(b=>b.onclick=()=>{ const sid=b.dataset.epro; if(donarPlaca(a,sid)) toast(soci(sid).nom+" ja és inscrit/a a "+a.nom+(deProva(a,sid)?" (de prova).":".")); render(); llistaAct(aid); });
+  const pl=$("#prLl"); if(pl) pl.onclick=async()=>{ pl.disabled=true; await pdfLlista(aid); pl.disabled=false; };
   const ea=$("#edAct"); if(ea) ea.onclick=()=>formAct(aid);
   const aa=$("#anAct"); if(aa) aa.onclick=()=>anularSessio(aid);
   const da=$("#delAct"); if(da) da.onclick=()=>confirmMotiu("Esborrar "+a.nom,"Se n'esborren les inscripcions i la llista d'espera. Si només s'atura, millor no esborrar-la.","Esborrar",m=>{ D.activitats=D.activitats.filter(x=>x.id!==a.id); D.rebuts=D.rebuts.filter(r=>r.act!==a.id||D.mesosTancats[r.mes]); logCanvi("Esborrat d'activitat",a.nom+" · "+casal(a.casal).curt,m); save(); toast("Activitat esborrada."); render(); });
@@ -1744,7 +1747,7 @@ async function pdfComanda(c){
   const dl = null;
   if(dl){ try{ await dl.save({filename:nom,data:blob}); toast("PDF de la comanda "+c.num+" descarregat."); return; }
     catch(e){ if(e&&e.code==="declined") return; if(e&&e.code==="rate_limited"){ toast("Ja hi ha una descàrrega pendent."); return; } } }
-  try{ doc.save(nom); toast("PDF de la comanda "+c.num+" descarregat."); }catch(e){ toast("No s'ha pogut descarregar el PDF."); }
+  try{ doc.save(nomFitxer(nom)); toast("PDF de la comanda "+c.num+" descarregat."); }catch(e){ toast("No s'ha pogut descarregar el PDF."); }
 }
 /* ---------- Petitoris de comanda (bar-cafeteria, neteja, farmaciola i material de tallers) ---------- */
 const PET_INFO={bar:{t:"Bar-cafeteria",d:"Aigües, cafè i infusions, refrescos, llet, cerveses, sucre, snacks, licors, brioixeria i sucs.",ic:"cup"},net:{t:"Neteja",d:"Productes i estris de neteja, paper, bosses, guants i gots.",ic:"tool"},far:{t:"Farmaciola",d:"Material de primeres cures: tiretes, gasses, antisèptic i gel hidroalcohòlic.",ic:"heart"},tal:{t:"Material de tallers",d:"Material per a manualitats i tallers: cartolines, cola, llapis, llana, tisores i pintura.",ic:"act"}};
@@ -1807,7 +1810,86 @@ function bindPetitori(){
     if(sota.length) confirmar("Hi ha comandes per sota del mínim",sota.map(x=>provC(x).nom+" (mínim "+eur(provC(x).min)+")").join(", ")+". Les vols enviar igualment? La Coordinació ho veurà.","Enviar igualment",fer); else fer(); };
   $("#petSend").onclick=()=>send(false); const s2=$("#petSend2"); if(s2) s2.onclick=()=>send(true);
 }
+/* ---------- Llista d'una activitat en PDF (per imprimir) ----------
+   Dades de l'activitat, inscrits (amb telèfon si el perfil pot veure contactes), persones de prova, llista d'espera
+   i caselles per apuntar l'assistència de les properes sessions. */
+async function pdfLlista(aid){
+  const a=D.activitats.find(x=>x.id===aid); if(!a) return;
+  let JsPDF; try{ JsPDF=await carregaJsPDF(); }catch(e){ toast("No s'ha pogut preparar el PDF. Comprova la connexió."); return; }
+  const doc=new JsPDF({unit:"mm",format:"a4"}), W=210, M=14, tel=can("persones","C");
+  const lila=[108,75,216], fosc=[43,27,92], gris=[107,95,160], linia=[228,220,247], taronja=[163,95,0];
+  const txt=(t,x,y,o)=>doc.text(String(t==null?"":t),x,y,o||{});
+  const [m1,m2]=await Promise.all([imgMida(LOGO_AM),imgMida(LOGO_AJT)]);
+  const cap=()=>{ const h1=12, w1=h1*m1.w/m1.h, h2=14, w2=h2*m2.w/m2.h;
+    try{ doc.addImage(LOGO_AM,"PNG",M,11,w1,h1); }catch(e){} try{ doc.addImage(LOGO_AJT,"PNG",W-M-w2,10,w2,h2); }catch(e){}
+    doc.setDrawColor(...lila); doc.setLineWidth(0.7); doc.line(M,27,W-M,27); };
+  cap();
+  doc.setFont("helvetica","bold"); doc.setFontSize(9); doc.setTextColor(...gris); txt((esPunt(a)?"ACTIVITAT PUNTUAL":"ACTIVITAT SETMANAL")+" · "+(EIXOS[a.eix]||"").toUpperCase(),M,35);
+  doc.setFontSize(19); doc.setTextColor(...fosc); const tl=doc.splitTextToSize(a.nom,W-2*M); tl.slice(0,2).forEach((l,i)=>txt(l,M,43+i*7.5)); let y=43+Math.min(tl.length,2)*7.5;
+  // caixa de dades
+  const pr=provaDe(a), lliures=Math.max(0,a.places-a.inscrits.length);
+  const files=[["Casal",casal(a.casal).nom],["Sala",(sala(a.sala)||{}).nom||"—"],["Horari",horari(a)],["Qui la fa",(a.prof||"—")+(esCoord()&&a.profTel?" · "+a.profTel:"")],
+    ...(!esPunt(a)&&(a.dIni||a.dFi)?[["Període",(a.dIni?"del "+fdLlarga(a.dIni):"")+(a.dFi?" al "+fdLlarga(a.dFi):"")]]:[]),
+    ["Places",a.inscrits.length+" ocupades de "+a.places+(lliures?" · "+lliures+" lliures":" · plena")+(pr.length?" · "+pr.length+" de prova":"")+" · "+a.espera.length+" en espera"],
+    ["Preu",r2(a.preu)>0?eur(a.preu)+(esPunt(a)?" (un sol pagament)":" al mes"):"Gratuïta"]];
+  const bh=6+files.length*5.6; doc.setFillColor(246,243,255); doc.roundedRect(M,y,W-2*M,bh,2.5,2.5,"F");
+  let yy=y+6; files.forEach(([k,v])=>{ doc.setFont("helvetica","bold"); doc.setFontSize(8.5); doc.setTextColor(...gris); txt(k.toUpperCase(),M+4,yy); doc.setFont("helvetica","normal"); doc.setFontSize(10); doc.setTextColor(...fosc); txt(doc.splitTextToSize(v,W-2*M-40)[0],M+34,yy); yy+=5.6; });
+  y+=bh+8;
+  // columnes de la taula d'inscrits
+  const ses = esPunt(a) ? [a.data] : properesSessions(a,4);
+  const ext=!!a.extres;
+  const cols=[{t:"Núm.",w:9},{t:"Nom i cognoms",w:0},{t:"Núm. pers.",w:17}].concat(tel?[{t:"Telèfon",w:24}]:[]).concat(ext?[{t:"Autocar",w:14},{t:"T. adapt.",w:14}]:[]).concat(ses.map(d=>({t:fdata(d),w:14,box:1})));
+  const fix=cols.reduce((t,c)=>t+c.w,0); cols[1].w=W-2*M-fix; let cx=M; cols.forEach(c=>{ c.x=cx; cx+=c.w; });
+  const capT=(tit,sub)=>{ doc.setFont("helvetica","bold"); doc.setFontSize(12); doc.setTextColor(...fosc); txt(tit,M,y); if(sub){ doc.setFont("helvetica","normal"); doc.setFontSize(8.5); doc.setTextColor(...gris); txt(sub,W-M,y,{align:"right"}); } y+=3;
+    doc.setFillColor(...fosc); doc.rect(M,y,W-2*M,7,"F"); doc.setFont("helvetica","bold"); doc.setFontSize(7.8); doc.setTextColor(255,255,255);
+    cols.forEach(c=>txt(c.t,c.box?c.x+c.w/2:c.x+2,y+4.7,c.box?{align:"center"}:{})); y+=7; };
+  const salt=(tit,sub)=>{ if(y>268){ doc.addPage(); cap(); y=36; capT(tit+" (continuació)",sub); } };
+  const fila=(i,sid,nota,col)=>{ const s=soci(sid)||{nom:"?",cognoms:""}, ex=exA(a,sid), rh=nota?9.5:7.5;
+    if(i%2){ doc.setFillColor(250,248,255); doc.rect(M,y,W-2*M,rh,"F"); }
+    doc.setFont("helvetica","normal"); doc.setFontSize(9); doc.setTextColor(...gris); txt(i+1,cols[0].x+2,y+5);
+    doc.setTextColor(...fosc); doc.setFont("helvetica","bold"); txt(doc.splitTextToSize(nomComplet(s),cols[1].w-3)[0],cols[1].x+2,y+5); doc.setFont("helvetica","normal");
+    if(nota){ doc.setFontSize(7.3); doc.setTextColor(...(col||gris)); txt(doc.splitTextToSize(nota,cols[1].w-3)[0],cols[1].x+2,y+8.6); doc.setFontSize(9); doc.setTextColor(...fosc); }
+    txt(s.num||"",cols[2].x+2,y+5);
+    let k=3; if(tel){ txt(s.tel||"—",cols[k].x+2,y+5); k++; }
+    if(ext){ txt(ex.au?"Sí":"",cols[k].x+2,y+5); txt(ex.ta?"Sí":"",cols[k+1].x+2,y+5); k+=2; }
+    doc.setDrawColor(...gris); doc.setLineWidth(0.25); for(;k<cols.length;k++){ const c=cols[k]; doc.rect(c.x+c.w/2-2.2,y+1.8,4.4,4.4); }
+    doc.setDrawColor(...linia); doc.setLineWidth(0.2); doc.line(M,y+rh,W-M,y+rh); y+=rh; };
+  capT("Persones inscrites ("+a.inscrits.length+")", ses.length?"Caselles: assistència de les properes sessions":"");
+  if(!a.inscrits.length){ doc.setFont("helvetica","italic"); doc.setFontSize(9); doc.setTextColor(...gris); txt("Encara no hi ha ningú inscrit.",M+2,y+5); y+=9; }
+  a.inscrits.forEach((sid,i)=>{ salt("Persones inscrites"); const p=a.prova&&a.prova[sid];
+    const parts=[]; if(p){ const fi=addDays(p.des,DIES_PROVA); parts.push("DE PROVA fins al "+fdata(fi)+(fi<isoAvui()?" (acabada)":"")); }
+    if(ext&&exA(a,sid).ct) parts.push("Contacte: "+exA(a,sid).ct);
+    fila(i,sid,parts.join(" · "),p?taronja:null); });
+  // espais per afegir a mà
+  for(let j=0;j<3;j++){ salt("Persones inscrites"); doc.setDrawColor(...linia); doc.line(M,y+7.5,W-M,y+7.5); doc.setFontSize(7.5); doc.setTextColor(...gris); if(j===0) txt("Altes noves (a mà):",cols[1].x+2,y+5); doc.setDrawColor(...gris); doc.setLineWidth(0.25); cols.forEach((c,k)=>{ if(c.box) doc.rect(c.x+c.w/2-2.2,y+1.8,4.4,4.4); }); y+=7.5; }
+  y+=8;
+  // llista d'espera
+  if(y>250){ doc.addPage(); cap(); y=36; }
+  doc.setFont("helvetica","bold"); doc.setFontSize(12); doc.setTextColor(...fosc); txt("Llista d'espera ("+a.espera.length+")",M,y); y+=3;
+  if(!a.espera.length){ doc.setFont("helvetica","italic"); doc.setFontSize(9); doc.setTextColor(...gris); txt("Ningú en espera.",M+2,y+5); y+=10; }
+  else { const ec=[{t:"Posició",x:M,w:15},{t:"Nom i cognoms",x:M+15,w:tel?105:130},{t:"Núm. pers.",x:M+(tel?120:145),w:22}].concat(tel?[{t:"Telèfon",x:M+142,w:40}]:[]);
+    doc.setFillColor(...fosc); doc.rect(M,y,W-2*M,7,"F"); doc.setFont("helvetica","bold"); doc.setFontSize(7.8); doc.setTextColor(255,255,255); ec.forEach(c=>txt(c.t,c.x+2,y+4.7)); y+=7;
+    a.espera.forEach((sid,i)=>{ if(y>272){ doc.addPage(); cap(); y=36; } const s=soci(sid)||{nom:"?",cognoms:""};
+      if(i%2){ doc.setFillColor(250,248,255); doc.rect(M,y,W-2*M,7.5,"F"); }
+      doc.setFont("helvetica","normal"); doc.setFontSize(9); doc.setTextColor(...fosc); txt(i+1,ec[0].x+2,y+5); doc.setFont("helvetica","bold"); txt(doc.splitTextToSize(nomComplet(s)+(deProva(a,sid)?" (de prova)":""),ec[1].w-3)[0],ec[1].x+2,y+5); doc.setFont("helvetica","normal");
+      txt(s.num||"",ec[2].x+2,y+5); if(tel) txt(s.tel||"—",ec[3].x+2,y+5);
+      doc.setDrawColor(...linia); doc.setLineWidth(0.2); doc.line(M,y+7.5,W-M,y+7.5); y+=7.5; });
+    y+=4; doc.setFont("helvetica","normal"); doc.setFontSize(8); doc.setTextColor(...gris); txt("Quan quedi una plaça, la coordinació o la professional decideix qui entra.",M,y+2); y+=6; }
+  // observacions
+  if(y>255){ doc.addPage(); cap(); y=36; }
+  y+=4; doc.setFont("helvetica","bold"); doc.setFontSize(9); doc.setTextColor(...gris); txt("OBSERVACIONS",M,y); doc.setDrawColor(...linia); for(let j=1;j<=3;j++) doc.line(M,y+j*7,W-M,y+j*7);
+  // peu
+  const np=doc.getNumberOfPages(), ara=new Date();
+  for(let i=1;i<=np;i++){ doc.setPage(i); doc.setDrawColor(...linia); doc.setLineWidth(0.3); doc.line(M,283,W-M,283); doc.setFont("helvetica","normal"); doc.setFontSize(7.3); doc.setTextColor(...gris);
+    txt("Conté dades personals: no la deixeu a la vista i destruïu-la quan ja no calgui. · Imprès el "+fdLlarga(isoAvui())+" a les "+String(ara.getHours()).padStart(2,"0")+":"+String(ara.getMinutes()).padStart(2,"0"),M,288);
+    txt("Pàgina "+i+" de "+np,W-M,288,{align:"right"}); }
+  logCanvi("Llista d'activitat impresa",a.nom+" · "+casal(a.casal).curt); save();
+  await desaPDF(doc,"Llista "+a.nom.replace(/[^\w\sÀ-ÿ·-]/g,"").trim()+" "+isoAvui()+".pdf");
+}
+/* Noms de fitxer sense accents: alguns navegadors ignoren el nom si porta caràcters no ASCII i baixen «download». */
+const nomFitxer = n => String(n).normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/·/g,"-").replace(/[^\w .()-]/g,"").replace(/\s+/g," ").trim();
 async function desaPDF(doc,nom){
+  nom=nomFitxer(nom);
   const blob=doc.output("blob"), dl = null;
   if(dl){ try{ await dl.save({filename:nom,data:blob}); toast("PDF descarregat."); return; }
     catch(e){ if(e&&e.code==="declined") return; if(e&&e.code==="rate_limited"){ toast("Ja hi ha una descàrrega pendent."); return; } } }
